@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, EventTouch, Node, Sprite, tween, UITransform, Vec3 } from 'cc';
+import { _decorator, Color, Component, EventTouch, Node, Sprite, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { PersonCard } from './PersonCard';
 import { WitnessCase } from './WitnessCase';
 
@@ -16,6 +16,10 @@ export class GameManager extends Component {
     @property([PersonCard]) public personCards: PersonCard[] = [];
     @property([WitnessCase]) public witnesses: WitnessCase[] = [];
     @property(Node) public winScreen: Node | null = null;
+    @property(Node) public introCanvas: Node | null = null;
+    @property(Node) public introContent: Node | null = null;
+    @property(Node) public introText: Node | null = null;
+    @property public introDuration = 3;
 
     private readonly cardHomes = new Map<PersonCard, CardHome>();
     private readonly slotOccupants = new Map<Node, PersonCard>();
@@ -27,8 +31,10 @@ export class GameManager extends Component {
     private locked = false;
 
     start() {
+        this.locked = true;
         this.personCards.forEach((card) => this.registerCard(card));
         this.witnesses.forEach((witness, index) => witness.configure(index === 0));
+        this.showIntro();
     }
 
     onDestroy() {
@@ -52,6 +58,58 @@ export class GameManager extends Component {
         card.node.on(Node.EventType.TOUCH_MOVE, this.onCardMove, this);
         card.node.on(Node.EventType.TOUCH_END, this.onCardEnd, this);
         card.node.on(Node.EventType.TOUCH_CANCEL, this.onCardEnd, this);
+    }
+
+    private showIntro() {
+        const introCanvas = this.introCanvas;
+        if (!introCanvas) {
+            this.locked = false;
+            return;
+        }
+
+        introCanvas.active = true;
+        const canvasOpacity = introCanvas.getComponent(UIOpacity) ?? introCanvas.addComponent(UIOpacity);
+        const contentNode = this.introContent ?? introCanvas;
+        const contentScale = contentNode.scale.clone();
+        const textNode = this.introText;
+        canvasOpacity.opacity = 0;
+        contentNode.setScale(contentScale.x * 1.035, contentScale.y * 1.035, contentScale.z);
+        tween(canvasOpacity).to(0.5, { opacity: 255 }, { easing: 'sineOut' }).start();
+        tween(contentNode).to(1.35, { scale: contentScale }, { easing: 'sineOut' }).start();
+
+        if (textNode) {
+            const finalScale = textNode.scale.clone();
+            const finalPosition = textNode.position.clone();
+            const textOpacity = textNode.getComponent(UIOpacity) ?? textNode.addComponent(UIOpacity);
+            textOpacity.opacity = 0;
+            textNode.setScale(finalScale.x * 0.94, finalScale.y * 0.94, finalScale.z);
+            textNode.setPosition(finalPosition.x, finalPosition.y - 22, finalPosition.z);
+            tween(textNode)
+                .delay(0.48)
+                .to(0.42, {
+                    position: finalPosition,
+                    scale: new Vec3(finalScale.x * 1.025, finalScale.y * 1.025, finalScale.z),
+                }, { easing: 'quadOut' })
+                .to(0.25, { scale: finalScale }, { easing: 'sineOut' })
+                .delay(0.34)
+                .to(0.32, { scale: new Vec3(finalScale.x * 1.015, finalScale.y * 1.015, finalScale.z) }, { easing: 'sineInOut' })
+                .to(0.38, { scale: finalScale }, { easing: 'sineInOut' })
+                .start();
+            tween(textOpacity).delay(0.48).to(0.38, { opacity: 255 }, { easing: 'sineOut' }).start();
+        }
+
+        this.scheduleOnce(() => {
+            tween(contentNode).to(0.4, { scale: new Vec3(contentScale.x * 1.015, contentScale.y * 1.015, contentScale.z) }, { easing: 'sineIn' }).start();
+            tween(canvasOpacity).to(0.42, { opacity: 0 }, { easing: 'sineIn' }).start();
+            if (textNode) {
+                const textOpacity = textNode.getComponent(UIOpacity)!;
+                tween(textOpacity).to(0.28, { opacity: 0 }, { easing: 'sineIn' }).start();
+            }
+        }, Math.max(0.2, this.introDuration - 0.42));
+        this.scheduleOnce(() => {
+            introCanvas.active = false;
+            this.locked = false;
+        }, this.introDuration);
     }
 
     private beginDrag(event: EventTouch) {

@@ -25,7 +25,10 @@ export class WitnessCase extends Component {
         if (this.witnessRoot) this.witnessRoot.active = true;
         this.clueElements.forEach((element) => element.active = isActive && !this.hideCluesUntilReveal);
         if (this.revealButton) this.revealButton.active = isActive;
-        if (isActive) this.innocentSlots.forEach((slot) => this.activateSlot(slot));
+        if (isActive) {
+            this.getSlotPanels().forEach((panel) => panel.active = true);
+            this.innocentSlots.forEach((slot) => slot.active = true);
+        }
     }
 
     private revealClues() {
@@ -33,18 +36,14 @@ export class WitnessCase extends Component {
         if (this.revealButton) this.revealButton.active = false;
     }
 
-    private activateSlot(slot: Node) {
-        let current: Node | null = slot;
-        while (current) {
-            current.active = true;
-            current = current.parent;
-        }
+    private getSlotPanels() {
+        return [...new Set(this.innocentSlots.map((slot) => slot.parent).filter((panel): panel is Node => panel !== null))];
     }
 
     public complete() {
         if (this.witnessRoot) this.witnessRoot.active = false;
         this.clueElements.forEach((element) => element.active = false);
         if (this.revealButton) this.revealButton.active = false;
-        this.innocentSlots.forEach((slot) => slot.active = false);
+        this.getSlotPanels().forEach((panel) => panel.active = false);
     }
 }
