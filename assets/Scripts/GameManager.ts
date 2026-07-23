@@ -260,12 +260,21 @@ export class GameManager extends Component {
 
         tween(textOpacity).to(0.22, { opacity: 255 }, { easing: 'sineOut' }).start();
         tween(tutorialText)
-            .to(0.28, { scale: new Vec3(textScale.x * 1.08, textScale.y * 1.08, textScale.z) }, { easing: 'backOut' })
+            .to(0.28, { scale: new Vec3(textScale.x * 1.12, textScale.y * 1.12, textScale.z) }, { easing: 'backOut' })
             .to(0.16, { scale: textScale }, { easing: 'sineOut' })
-            .delay(0.22)
-            .to(0.2, { scale: new Vec3(textScale.x * 1.04, textScale.y * 1.04, textScale.z) }, { easing: 'sineInOut' })
-            .to(0.2, { scale: textScale }, { easing: 'sineInOut' })
             .start();
+
+        const pulseScale = new Vec3(textScale.x * 1.03, textScale.y * 1.03, textScale.z);
+        this.scheduleOnce(() => {
+            tween(tutorialText)
+                .repeatForever(
+                    tween()
+                        .to(0.4, { scale: pulseScale }, { easing: 'sineInOut' })
+                        .to(0.4, { scale: textScale }, { easing: 'sineInOut' }),
+                )
+                .start();
+        }, 0.44);
+
         this.scheduleOnce(() => {
             tutorialController.playTutorial(tutorialTarget, dropTarget);
             this.locked = false;
