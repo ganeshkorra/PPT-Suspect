@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, EventTouch, Node, Sprite, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, Color, Component, EventTouch, Label, Node, Sprite, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { PersonCard } from './PersonCard';
 import { WitnessCase } from './WitnessCase';
 
@@ -31,6 +31,9 @@ export class GameManager extends Component {
     @property(Node) public tutorialHandTarget: Node | null = null;
     @property(Node) public tutorialDropTarget: Node | null = null;
     @property public tutorialDuration = 2.5;
+    @property public gameDuration = 45;
+    @property(Label) public timerLabel: Label | null = null;
+    @property(Node) public failScreen: Node | null = null;
 
     private readonly cardHomes = new Map<PersonCard, CardHome>();
     private readonly slotOccupants = new Map<Node, PersonCard>();
@@ -41,6 +44,14 @@ export class GameManager extends Component {
     private pressPosition = new Vec3();
     private draggedCard: PersonCard | null = null;
     private locked = false;
+    private gameFinished = false;
+    private tutorialActive = false;
+    private tutorialTargetPosition: Vec3 | null = null;
+    private tutorialTargetScale: Vec3 | null = null;
+    private tutorialTargetOpacity: UIOpacity | null = null;
+    private remainingSeconds = 0;
+    private readonly timerTick = () => this.updateTimerLabel();
+    private readonly timerExpired = () => this.failLevel();
 
     start() {
         this.locked = true;
@@ -60,6 +71,8 @@ export class GameManager extends Component {
             card.node.off(Node.EventType.TOUCH_END, this.onCardEnd, this);
             card.node.off(Node.EventType.TOUCH_CANCEL, this.onCardEnd, this);
         });
+        this.unschedule(this.timerTick);
+        this.unschedule(this.timerExpired);
     }
 
     private registerCard(card: PersonCard) {
@@ -222,9 +235,11 @@ export class GameManager extends Component {
         const dropTarget = this.tutorialDropTarget ?? this.witnesses[this.currentWitnessIndex]?.innocentSlots[0] ?? null;
         if (!tutorialText || !tutorialHand || !tutorialTarget || !dropTarget) {
             this.locked = false;
+            this.startGameTimer();
             return;
         }
 
+        this.tutorialActive = true;
         tutorialText.active = true;
         tutorialHand.active = true;
         const textOpacity = tutorialText.getComponent(UIOpacity) ?? tutorialText.addComponent(UIOpacity);
@@ -237,6 +252,9 @@ export class GameManager extends Component {
         const dropWorldPosition = dropTarget.worldPosition.clone();
         const handStartPosition = new Vec3(targetWorldPosition.x + 18, targetWorldPosition.y - 18, tutorialHand.worldPosition.z);
         const handDropPosition = new Vec3(dropWorldPosition.x + 18, dropWorldPosition.y - 18, tutorialHand.worldPosition.z);
+        this.tutorialTargetPosition = targetWorldPosition;
+        this.tutorialTargetScale = targetScale;
+        this.tutorialTargetOpacity = targetOpacity;
 
         textOpacity.opacity = 0;
         handOpacity.opacity = 0;
@@ -261,25 +279,67 @@ export class GameManager extends Component {
             .to(0.68, { worldPosition: handDropPosition }, { easing: 'sineInOut' })
             .to(0.14, { scale: new Vec3(handScale.x * 0.92, handScale.y * 0.92, handScale.z) }, { easing: 'sineIn' })
             .start();
-        tween(tutorialTarget)
-            .delay(0.82)
-            .to(0.68, { worldPosition: dropWorldPosition }, { easing: 'sineInOut' })
-            .start();
-
         this.scheduleOnce(() => {
-            tween(textOpacity).to(0.2, { opacity: 0 }, { easing: 'sineIn' }).start();
-            tween(handOpacity).to(0.2, { opacity: 0 }, { easing: 'sineIn' }).start();
-            tween(tutorialTarget).to(0.2, { worldPosition: targetWorldPosition }, { easing: 'sineInOut' }).start();
-            tween(targetOpacity).delay(0.2).to(0.08, { opacity: 255 }).start();
-        }, Math.max(1.2, this.tutorialDuration - 0.35));
-        this.scheduleOnce(() => {
-            tutorialText.active = false;
-            tutorialHand.active = false;
-            tutorialTarget.setWorldPosition(targetWorldPosition);
-            tutorialTarget.setScale(targetScale);
-            targetOpacity.opacity = 255;
+            tween(tutorialHand)
+                .repeatForever(
+                    tween()
+                        .to(0.3, { worldPosition: handStartPosition, scale: handScale }, { easing: 'sineInOut' })
+                        .to(0.68, { worldPosition: handDropPosition }, { easing: 'sineInOut' })
+                        .delay(0.18),
+                )
+                .start();
             this.locked = false;
-        }, this.tutorialDuration);
+            this.startGameTimer();
+        }, 1.68);
+    }
+
+    private hideTutorial() {
+        if (!this.tutorialActive) return;
+        this.tutorialActive = false;
+        const tutorialText = this.tutorialText;
+        const tutorialHand = this.tutorialHand;
+        const tutorialTarget = this.tutorialHandTarget;
+        if (tutorialText) {
+            Tween.stopAllByTarget(tutorialText);
+            tutorialText.active = false;
+        }
+        if (tutorialHand) {
+            Tween.stopAllByTarget(tutorialHand);
+            tutorialHand.active = false;
+        }
+        if (tutorialTarget) {
+            Tween.stopAllByTarget(tutorialTarget);
+            if (this.tutorialTargetPosition) tutorialTarget.setWorldPosition(this.tutorialTargetPosition);
+            if (this.tutorialTargetScale) tutorialTarget.setScale(this.tutorialTargetScale);
+        }
+        if (this.tutorialTargetOpacity) this.tutorialTargetOpacity.opacity = 255;
+    }
+
+    private startGameTimer() {
+        if (this.gameFinished || this.remainingSeconds > 0) return;
+        this.remainingSeconds = Math.max(1, Math.ceil(this.gameDuration));
+        if (this.timerLabel) this.timerLabel.string = `${this.remainingSeconds}s`;
+        this.schedule(this.timerTick, 1);
+        this.scheduleOnce(this.timerExpired, this.remainingSeconds);
+    }
+
+    private updateTimerLabel() {
+        if (this.remainingSeconds > 0) this.remainingSeconds--;
+        if (this.timerLabel) this.timerLabel.string = `${Math.max(0, this.remainingSeconds)}s`;
+    }
+
+    private stopGameTimer() {
+        this.unschedule(this.timerTick);
+        this.unschedule(this.timerExpired);
+    }
+
+    private failLevel() {
+        if (this.gameFinished) return;
+        this.gameFinished = true;
+        this.locked = true;
+        this.stopGameTimer();
+        this.hideTutorial();
+        if (this.failScreen) this.failScreen.active = true;
     }
 
     private playWitnessReveal(witness: WitnessCase | undefined, delay: number, dramatic = false) {
@@ -348,6 +408,7 @@ export class GameManager extends Component {
         if (this.locked || this.currentWitnessIndex >= this.witnesses.length) return;
         const card = (event.currentTarget as Node).getComponent(PersonCard);
         if (!card || !card.node.active || card.isLockedInSlot) return;
+        this.hideTutorial();
         const location = event.getUILocation();
         this.pressedCard = card;
         this.pressPosition.set(location.x, location.y, 0);
@@ -495,8 +556,11 @@ export class GameManager extends Component {
     }
 
     private winLevel() {
-        if (this.locked) return;
+        if (this.locked || this.gameFinished) return;
+        this.gameFinished = true;
         this.locked = true;
+        this.stopGameTimer();
+        this.hideTutorial();
         if (this.winScreen) this.winScreen.active = true;
     }
 }
