@@ -21,14 +21,12 @@ export class WitnessCase extends Component {
         this.revealButton?.off(Node.EventType.TOUCH_END, this.revealClues, this);
     }
 
-    public configure(isActive: boolean) {
-        if (this.witnessRoot) this.witnessRoot.active = true;
-        this.clueElements.forEach((element) => element.active = isActive && !this.hideCluesUntilReveal);
+    public configure(isActive: boolean, showClue = isActive) {
+        if (this.witnessRoot) this.witnessRoot.active = isActive;
+        this.clueElements.forEach((element) => element.active = isActive && showClue && !this.hideCluesUntilReveal);
         if (this.revealButton) this.revealButton.active = isActive;
-        if (isActive) {
-            this.getSlotPanels().forEach((panel) => panel.active = true);
-            this.innocentSlots.forEach((slot) => slot.active = true);
-        }
+        this.getSlotPanels().forEach((panel) => panel.active = isActive);
+        if (isActive) this.innocentSlots.forEach((slot) => slot.active = true);
     }
 
     private revealClues() {
