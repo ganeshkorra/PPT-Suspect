@@ -48,16 +48,15 @@ export class GameManager extends Component {
     private locked = false;
     private gameFinished = false;
     private tutorialActive = false;
-    private tutorialTargetPosition: Vec3 | null = null;
-    private tutorialTargetScale: Vec3 | null = null;
-    private tutorialTargetOpacity: UIOpacity | null = null;
     private remainingSeconds = 0;
+    private timerStarted = false;
     private ctaShown = false;
     private readonly timerTick = () => this.updateTimerLabel();
     private readonly timerExpired = () => this.failLevel();
 
     start() {
         this.locked = true;
+        if (this.timerLabel) this.timerLabel.string = `${Math.max(0, Math.ceil(this.gameDuration))}s`;
         this.personCards.forEach((card) => this.registerCard(card));
         this.witnesses.forEach((witness, index) => witness.configure(index === 0, false));
         this.witnesses.forEach((witness) => {
@@ -178,6 +177,14 @@ export class GameManager extends Component {
         return [...new Set(witness.innocentSlots.map((slot) => slot.parent).filter((panel): panel is Node => panel !== null))];
     }
 
+    private getTutorialPersonCard(): PersonCard | null {
+        const witness = this.witnesses[this.currentWitnessIndex];
+        if (!witness) return null;
+        const matching = this.personCards.find((card) => card.matches(witness.requiredPersonIds) && card.node.active && !card.isLockedInSlot);
+        if (matching) return matching;
+        return this.personCards.find((card) => card.node.active && !card.isSuspect) ?? null;
+    }
+
     private preparePresentationNode(node: Node, offsetX: number, scaleMultiplier: number) {
         if (!node.active) return;
         const state = { position: node.position.clone(), scale: node.scale.clone(), eulerAngles: node.eulerAngles.clone() };
@@ -234,12 +241,11 @@ export class GameManager extends Component {
     private showTutorial() {
         const tutorialText = this.tutorialText;
         const tutorialRoot = this.tutorialHand;
-        const tutorialTarget = this.tutorialHandTarget;
+        const tutorialTarget = this.tutorialHandTarget ?? this.getTutorialPersonCard()?.node ?? null;
         const dropTarget = this.tutorialDropTarget ?? this.witnesses[this.currentWitnessIndex]?.innocentSlots[0] ?? null;
         const tutorialController = tutorialRoot?.getComponent(TutorialController) ?? null;
         if (!tutorialText || !tutorialRoot || !tutorialController || !tutorialTarget || !dropTarget) {
             this.locked = false;
-            this.startGameTimer();
             return;
         }
 
@@ -247,17 +253,9 @@ export class GameManager extends Component {
         tutorialText.active = true;
         tutorialRoot.active = true;
         const textOpacity = tutorialText.getComponent(UIOpacity) ?? tutorialText.addComponent(UIOpacity);
-        const targetOpacity = tutorialTarget.getComponent(UIOpacity) ?? tutorialTarget.addComponent(UIOpacity);
         const textScale = tutorialText.scale.clone();
-        const targetScale = tutorialTarget.scale.clone();
-        const targetWorldPosition = tutorialTarget.worldPosition.clone();
-        const dropWorldPosition = dropTarget.worldPosition.clone();
-        this.tutorialTargetPosition = targetWorldPosition;
-        this.tutorialTargetScale = targetScale;
-        this.tutorialTargetOpacity = targetOpacity;
 
         textOpacity.opacity = 0;
-        targetOpacity.opacity = 255;
         tutorialText.setScale(textScale.x * 0.68, textScale.y * 0.68, textScale.z);
 
         tween(textOpacity).to(0.22, { opacity: 255 }, { easing: 'sineOut' }).start();
@@ -268,12 +266,9 @@ export class GameManager extends Component {
             .to(0.2, { scale: new Vec3(textScale.x * 1.04, textScale.y * 1.04, textScale.z) }, { easing: 'sineInOut' })
             .to(0.2, { scale: textScale }, { easing: 'sineInOut' })
             .start();
-        tween(targetOpacity).delay(0.72).to(0.16, { opacity: 105 }, { easing: 'sineOut' }).start();
         this.scheduleOnce(() => {
             tutorialController.playTutorial(tutorialTarget, dropTarget);
-            this.playTutorialGhostLoop(tutorialTarget, targetWorldPosition, dropWorldPosition);
             this.locked = false;
-            this.startGameTimer();
         }, 1.68);
     }
 
@@ -293,26 +288,13 @@ export class GameManager extends Component {
         }
         if (tutorialTarget) {
             Tween.stopAllByTarget(tutorialTarget);
-            if (this.tutorialTargetPosition) tutorialTarget.setWorldPosition(this.tutorialTargetPosition);
-            if (this.tutorialTargetScale) tutorialTarget.setScale(this.tutorialTargetScale);
         }
-        if (this.tutorialTargetOpacity) this.tutorialTargetOpacity.opacity = 255;
     }
 
-    private playTutorialGhostLoop(target: Node, startPosition: Vec3, endPosition: Vec3) {
-        if (!this.tutorialActive) return;
-        target.setWorldPosition(startPosition);
-        tween(target)
-            .delay(0.65)
-            .to(1.5, { worldPosition: endPosition }, { easing: 'sineInOut' })
-            .delay(0.2)
-            .to(0.2, { worldPosition: startPosition }, { easing: 'sineInOut' })
-            .call(() => this.playTutorialGhostLoop(target, startPosition, endPosition))
-            .start();
-    }
 
     private startGameTimer() {
-        if (this.gameFinished || this.remainingSeconds > 0) return;
+        if (this.gameFinished || this.timerStarted) return;
+        this.timerStarted = true;
         this.remainingSeconds = Math.max(1, Math.ceil(this.gameDuration));
         if (this.timerLabel) this.timerLabel.string = `${this.remainingSeconds}s`;
         this.schedule(this.timerTick, 1);
@@ -404,6 +386,7 @@ export class GameManager extends Component {
         if (this.locked || this.currentWitnessIndex >= this.witnesses.length) return;
         const card = (event.currentTarget as Node).getComponent(PersonCard);
         if (!card || !card.node.active || card.isLockedInSlot) return;
+        this.startGameTimer();
         this.hideTutorial();
         const location = event.getUILocation();
         this.pressedCard = card;
