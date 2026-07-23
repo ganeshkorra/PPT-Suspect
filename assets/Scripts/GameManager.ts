@@ -14,6 +14,7 @@ interface CardHome {
 interface PresentationState {
     position: Vec3;
     scale: Vec3;
+    eulerAngles: Vec3;
 }
 
 @ccclass('GameManager')
@@ -25,6 +26,11 @@ export class GameManager extends Component {
     @property(Node) public introContent: Node | null = null;
     @property(Node) public introText: Node | null = null;
     @property public introDuration = 3;
+    @property(Node) public tutorialText: Node | null = null;
+    @property(Node) public tutorialHand: Node | null = null;
+    @property(Node) public tutorialHandTarget: Node | null = null;
+    @property(Node) public tutorialDropTarget: Node | null = null;
+    @property public tutorialDuration = 2.5;
 
     private readonly cardHomes = new Map<PersonCard, CardHome>();
     private readonly slotOccupants = new Map<Node, PersonCard>();
@@ -142,7 +148,7 @@ export class GameManager extends Component {
         });
         this.getCurrentSlotPanels().forEach((panel, index) => this.playPresentationNode(panel, 1.48 + index * 0.06, 0.34));
         this.scheduleOnce(() => this.revealCurrentClue(), 1.98);
-        this.scheduleOnce(() => this.locked = false, 2.28);
+        this.scheduleOnce(() => this.showTutorial(), 2.34);
     }
 
     private getSuspectPanel() {
@@ -158,7 +164,7 @@ export class GameManager extends Component {
 
     private preparePresentationNode(node: Node, offsetX: number, scaleMultiplier: number) {
         if (!node.active) return;
-        const state = { position: node.position.clone(), scale: node.scale.clone() };
+        const state = { position: node.position.clone(), scale: node.scale.clone(), eulerAngles: node.eulerAngles.clone() };
         this.presentationStates.set(node, state);
         const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
         opacity.opacity = 0;
@@ -173,7 +179,7 @@ export class GameManager extends Component {
         tween(opacity).delay(delay).to(Math.min(0.22, duration), { opacity: 255 }, { easing: 'sineOut' }).start();
         tween(node)
             .delay(delay)
-            .to(duration, { position: state.position, scale: state.scale }, { easing: 'quadOut' })
+            .to(duration, { position: state.position, scale: state.scale, eulerAngles: state.eulerAngles }, { easing: 'quadOut' })
             .start();
     }
 
@@ -209,6 +215,73 @@ export class GameManager extends Component {
         });
     }
 
+    private showTutorial() {
+        const tutorialText = this.tutorialText;
+        const tutorialHand = this.tutorialHand;
+        const tutorialTarget = this.tutorialHandTarget;
+        const dropTarget = this.tutorialDropTarget ?? this.witnesses[this.currentWitnessIndex]?.innocentSlots[0] ?? null;
+        if (!tutorialText || !tutorialHand || !tutorialTarget || !dropTarget) {
+            this.locked = false;
+            return;
+        }
+
+        tutorialText.active = true;
+        tutorialHand.active = true;
+        const textOpacity = tutorialText.getComponent(UIOpacity) ?? tutorialText.addComponent(UIOpacity);
+        const handOpacity = tutorialHand.getComponent(UIOpacity) ?? tutorialHand.addComponent(UIOpacity);
+        const targetOpacity = tutorialTarget.getComponent(UIOpacity) ?? tutorialTarget.addComponent(UIOpacity);
+        const textScale = tutorialText.scale.clone();
+        const handScale = tutorialHand.scale.clone();
+        const targetScale = tutorialTarget.scale.clone();
+        const targetWorldPosition = tutorialTarget.worldPosition.clone();
+        const dropWorldPosition = dropTarget.worldPosition.clone();
+        const handStartPosition = new Vec3(targetWorldPosition.x + 18, targetWorldPosition.y - 18, tutorialHand.worldPosition.z);
+        const handDropPosition = new Vec3(dropWorldPosition.x + 18, dropWorldPosition.y - 18, tutorialHand.worldPosition.z);
+
+        textOpacity.opacity = 0;
+        handOpacity.opacity = 0;
+        targetOpacity.opacity = 255;
+        tutorialText.setScale(textScale.x * 0.68, textScale.y * 0.68, textScale.z);
+        tutorialHand.setScale(handScale.x * 0.78, handScale.y * 0.78, handScale.z);
+        tutorialHand.setWorldPosition(handStartPosition);
+
+        tween(textOpacity).to(0.22, { opacity: 255 }, { easing: 'sineOut' }).start();
+        tween(tutorialText)
+            .to(0.28, { scale: new Vec3(textScale.x * 1.08, textScale.y * 1.08, textScale.z) }, { easing: 'backOut' })
+            .to(0.16, { scale: textScale }, { easing: 'sineOut' })
+            .delay(0.22)
+            .to(0.2, { scale: new Vec3(textScale.x * 1.04, textScale.y * 1.04, textScale.z) }, { easing: 'sineInOut' })
+            .to(0.2, { scale: textScale }, { easing: 'sineInOut' })
+            .start();
+        tween(handOpacity).delay(0.54).to(0.16, { opacity: 255 }, { easing: 'sineOut' }).start();
+        tween(tutorialHand).delay(0.54).to(0.16, { scale: handScale }, { easing: 'backOut' }).start();
+        tween(targetOpacity).delay(0.72).to(0.16, { opacity: 105 }, { easing: 'sineOut' }).start();
+        tween(tutorialHand)
+            .delay(0.82)
+            .to(0.68, { worldPosition: handDropPosition }, { easing: 'sineInOut' })
+            .to(0.14, { scale: new Vec3(handScale.x * 0.92, handScale.y * 0.92, handScale.z) }, { easing: 'sineIn' })
+            .start();
+        tween(tutorialTarget)
+            .delay(0.82)
+            .to(0.68, { worldPosition: dropWorldPosition }, { easing: 'sineInOut' })
+            .start();
+
+        this.scheduleOnce(() => {
+            tween(textOpacity).to(0.2, { opacity: 0 }, { easing: 'sineIn' }).start();
+            tween(handOpacity).to(0.2, { opacity: 0 }, { easing: 'sineIn' }).start();
+            tween(tutorialTarget).to(0.2, { worldPosition: targetWorldPosition }, { easing: 'sineInOut' }).start();
+            tween(targetOpacity).delay(0.2).to(0.08, { opacity: 255 }).start();
+        }, Math.max(1.2, this.tutorialDuration - 0.35));
+        this.scheduleOnce(() => {
+            tutorialText.active = false;
+            tutorialHand.active = false;
+            tutorialTarget.setWorldPosition(targetWorldPosition);
+            tutorialTarget.setScale(targetScale);
+            targetOpacity.opacity = 255;
+            this.locked = false;
+        }, this.tutorialDuration);
+    }
+
     private playWitnessReveal(witness: WitnessCase | undefined, delay: number, dramatic = false) {
         if (!witness) return;
         if (witness.witnessRoot) {
@@ -223,14 +296,15 @@ export class GameManager extends Component {
         this.scheduleOnce(() => this.locked = false, delay + (dramatic ? 1.18 : 1.08));
     }
 
-    private prepareBurstNode(node: Node, offsetX: number, offsetY: number, scaleMultiplier: number) {
+    private prepareBurstNode(node: Node, offsetX: number, offsetY: number, scaleMultiplier: number, rotationZ = 0) {
         if (!node.active) return;
-        const state = { position: node.position.clone(), scale: node.scale.clone() };
+        const state = { position: node.position.clone(), scale: node.scale.clone(), eulerAngles: node.eulerAngles.clone() };
         this.presentationStates.set(node, state);
         const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
         opacity.opacity = 0;
         node.setPosition(state.position.x + offsetX, state.position.y + offsetY, state.position.z);
         node.setScale(state.scale.x * scaleMultiplier, state.scale.y * scaleMultiplier, state.scale.z);
+        node.setRotationFromEuler(state.eulerAngles.x, state.eulerAngles.y, state.eulerAngles.z + rotationZ);
     }
 
     private playBurstNode(node: Node, delay: number) {
@@ -243,6 +317,7 @@ export class GameManager extends Component {
             .to(0.27, {
                 position: state.position,
                 scale: new Vec3(state.scale.x * 1.08, state.scale.y * 1.08, state.scale.z),
+                eulerAngles: state.eulerAngles,
             }, { easing: 'backOut' })
             .to(0.15, { scale: state.scale }, { easing: 'sineOut' })
             .start();
@@ -254,14 +329,19 @@ export class GameManager extends Component {
             const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
             const position = node.position.clone();
             const scale = node.scale.clone();
+            const eulerAngles = node.eulerAngles.clone();
             tween(node)
                 .delay(index * 0.04)
                 .to(0.1, { scale: new Vec3(scale.x * 1.08, scale.y * 1.08, scale.z) }, { easing: 'quadOut' })
-                .to(0.26, { position: new Vec3(position.x - 130, position.y + 42, position.z), scale: new Vec3(scale.x * 0.65, scale.y * 0.65, scale.z) }, { easing: 'backIn' })
+                .to(0.38, {
+                    position: new Vec3(position.x + 145, position.y + 145, position.z),
+                    scale: new Vec3(scale.x * 0.7, scale.y * 0.7, scale.z),
+                    eulerAngles: new Vec3(eulerAngles.x, eulerAngles.y, eulerAngles.z - 18),
+                }, { easing: 'quadIn' })
                 .start();
-            tween(opacity).delay(0.1 + index * 0.04).to(0.24, { opacity: 0 }, { easing: 'sineIn' }).start();
+            tween(opacity).delay(0.08 + index * 0.04).to(0.42, { opacity: 0 }, { easing: 'sineIn' }).start();
         });
-        this.scheduleOnce(onComplete, 0.42);
+        this.scheduleOnce(onComplete, 0.56);
     }
 
     private beginDrag(event: EventTouch) {
@@ -391,8 +471,8 @@ export class GameManager extends Component {
             const nextWitness = this.witnesses[this.currentWitnessIndex];
             if (nextWitness) {
                 nextWitness.configure(true, false);
-                if (nextWitness.witnessRoot) this.prepareBurstNode(nextWitness.witnessRoot, 160, -34, 0.58);
-                this.getCurrentSlotPanels().forEach((panel) => this.prepareBurstNode(panel, -150, -70, 0.7));
+                if (nextWitness.witnessRoot) this.prepareBurstNode(nextWitness.witnessRoot, -90, 145, 0.66, 12);
+                this.getCurrentSlotPanels().forEach((panel) => this.prepareBurstNode(panel, 70, 145, 0.76, -14));
                 this.playWitnessReveal(nextWitness, 0.08, true);
                 return;
             }
