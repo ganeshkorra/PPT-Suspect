@@ -1,5 +1,6 @@
-import { _decorator, Color, Component, EventTouch, Label, Node, Sprite, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, Color, Component, director, EventTouch, Label, Node, Sprite, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { PersonCard } from './PersonCard';
+import { TutorialController } from './TutorialController';
 import { WitnessCase } from './WitnessCase';
 
 const { ccclass, property } = _decorator;
@@ -34,6 +35,7 @@ export class GameManager extends Component {
     @property public gameDuration = 45;
     @property(Label) public timerLabel: Label | null = null;
     @property(Node) public failScreen: Node | null = null;
+    @property(Node) public killerNode: Node | null = null;
 
     private readonly cardHomes = new Map<PersonCard, CardHome>();
     private readonly slotOccupants = new Map<Node, PersonCard>();
@@ -50,6 +52,7 @@ export class GameManager extends Component {
     private tutorialTargetScale: Vec3 | null = null;
     private tutorialTargetOpacity: UIOpacity | null = null;
     private remainingSeconds = 0;
+    private ctaShown = false;
     private readonly timerTick = () => this.updateTimerLabel();
     private readonly timerExpired = () => this.failLevel();
 
@@ -230,10 +233,11 @@ export class GameManager extends Component {
 
     private showTutorial() {
         const tutorialText = this.tutorialText;
-        const tutorialHand = this.tutorialHand;
+        const tutorialRoot = this.tutorialHand;
         const tutorialTarget = this.tutorialHandTarget;
         const dropTarget = this.tutorialDropTarget ?? this.witnesses[this.currentWitnessIndex]?.innocentSlots[0] ?? null;
-        if (!tutorialText || !tutorialHand || !tutorialTarget || !dropTarget) {
+        const tutorialController = tutorialRoot?.getComponent(TutorialController) ?? null;
+        if (!tutorialText || !tutorialRoot || !tutorialController || !tutorialTarget || !dropTarget) {
             this.locked = false;
             this.startGameTimer();
             return;
@@ -241,27 +245,20 @@ export class GameManager extends Component {
 
         this.tutorialActive = true;
         tutorialText.active = true;
-        tutorialHand.active = true;
+        tutorialRoot.active = true;
         const textOpacity = tutorialText.getComponent(UIOpacity) ?? tutorialText.addComponent(UIOpacity);
-        const handOpacity = tutorialHand.getComponent(UIOpacity) ?? tutorialHand.addComponent(UIOpacity);
         const targetOpacity = tutorialTarget.getComponent(UIOpacity) ?? tutorialTarget.addComponent(UIOpacity);
         const textScale = tutorialText.scale.clone();
-        const handScale = tutorialHand.scale.clone();
         const targetScale = tutorialTarget.scale.clone();
         const targetWorldPosition = tutorialTarget.worldPosition.clone();
         const dropWorldPosition = dropTarget.worldPosition.clone();
-        const handStartPosition = new Vec3(targetWorldPosition.x + 18, targetWorldPosition.y - 18, tutorialHand.worldPosition.z);
-        const handDropPosition = new Vec3(dropWorldPosition.x + 18, dropWorldPosition.y - 18, tutorialHand.worldPosition.z);
         this.tutorialTargetPosition = targetWorldPosition;
         this.tutorialTargetScale = targetScale;
         this.tutorialTargetOpacity = targetOpacity;
 
         textOpacity.opacity = 0;
-        handOpacity.opacity = 0;
         targetOpacity.opacity = 255;
         tutorialText.setScale(textScale.x * 0.68, textScale.y * 0.68, textScale.z);
-        tutorialHand.setScale(handScale.x * 0.78, handScale.y * 0.78, handScale.z);
-        tutorialHand.setWorldPosition(handStartPosition);
 
         tween(textOpacity).to(0.22, { opacity: 255 }, { easing: 'sineOut' }).start();
         tween(tutorialText)
@@ -271,23 +268,10 @@ export class GameManager extends Component {
             .to(0.2, { scale: new Vec3(textScale.x * 1.04, textScale.y * 1.04, textScale.z) }, { easing: 'sineInOut' })
             .to(0.2, { scale: textScale }, { easing: 'sineInOut' })
             .start();
-        tween(handOpacity).delay(0.54).to(0.16, { opacity: 255 }, { easing: 'sineOut' }).start();
-        tween(tutorialHand).delay(0.54).to(0.16, { scale: handScale }, { easing: 'backOut' }).start();
         tween(targetOpacity).delay(0.72).to(0.16, { opacity: 105 }, { easing: 'sineOut' }).start();
-        tween(tutorialHand)
-            .delay(0.82)
-            .to(0.68, { worldPosition: handDropPosition }, { easing: 'sineInOut' })
-            .to(0.14, { scale: new Vec3(handScale.x * 0.92, handScale.y * 0.92, handScale.z) }, { easing: 'sineIn' })
-            .start();
         this.scheduleOnce(() => {
-            tween(tutorialHand)
-                .repeatForever(
-                    tween()
-                        .to(0.3, { worldPosition: handStartPosition, scale: handScale }, { easing: 'sineInOut' })
-                        .to(0.68, { worldPosition: handDropPosition }, { easing: 'sineInOut' })
-                        .delay(0.18),
-                )
-                .start();
+            tutorialController.playTutorial(tutorialTarget, dropTarget);
+            this.playTutorialGhostLoop(tutorialTarget, targetWorldPosition, dropWorldPosition);
             this.locked = false;
             this.startGameTimer();
         }, 1.68);
@@ -297,15 +281,15 @@ export class GameManager extends Component {
         if (!this.tutorialActive) return;
         this.tutorialActive = false;
         const tutorialText = this.tutorialText;
-        const tutorialHand = this.tutorialHand;
+        const tutorialRoot = this.tutorialHand;
         const tutorialTarget = this.tutorialHandTarget;
         if (tutorialText) {
             Tween.stopAllByTarget(tutorialText);
             tutorialText.active = false;
         }
-        if (tutorialHand) {
-            Tween.stopAllByTarget(tutorialHand);
-            tutorialHand.active = false;
+        if (tutorialRoot) {
+            tutorialRoot.getComponent(TutorialController)?.stopTutorial();
+            tutorialRoot.active = false;
         }
         if (tutorialTarget) {
             Tween.stopAllByTarget(tutorialTarget);
@@ -313,6 +297,18 @@ export class GameManager extends Component {
             if (this.tutorialTargetScale) tutorialTarget.setScale(this.tutorialTargetScale);
         }
         if (this.tutorialTargetOpacity) this.tutorialTargetOpacity.opacity = 255;
+    }
+
+    private playTutorialGhostLoop(target: Node, startPosition: Vec3, endPosition: Vec3) {
+        if (!this.tutorialActive) return;
+        target.setWorldPosition(startPosition);
+        tween(target)
+            .delay(0.65)
+            .to(1.5, { worldPosition: endPosition }, { easing: 'sineInOut' })
+            .delay(0.2)
+            .to(0.2, { worldPosition: startPosition }, { easing: 'sineInOut' })
+            .call(() => this.playTutorialGhostLoop(target, startPosition, endPosition))
+            .start();
     }
 
     private startGameTimer() {
@@ -339,7 +335,7 @@ export class GameManager extends Component {
         this.locked = true;
         this.stopGameTimer();
         this.hideTutorial();
-        if (this.failScreen) this.failScreen.active = true;
+        this.showCTA();
     }
 
     private playWitnessReveal(witness: WitnessCase | undefined, delay: number, dramatic = false) {
@@ -561,6 +557,72 @@ export class GameManager extends Component {
         this.locked = true;
         this.stopGameTimer();
         this.hideTutorial();
-        if (this.winScreen) this.winScreen.active = true;
+        this.showKillerThenCTA();
+    }
+
+    private showKillerThenCTA() {
+        const killer = this.killerNode ?? this.node.parent?.getChildByName('Killer') ?? this.winScreen;
+        if (!killer) {
+            this.showCTA();
+            return;
+        }
+        killer.active = true;
+        const finalScale = killer.scale.clone();
+        const opacity = killer.getComponent(UIOpacity) ?? killer.addComponent(UIOpacity);
+        opacity.opacity = 0;
+        killer.setScale(finalScale.x * 0.68, finalScale.y * 0.68, finalScale.z);
+        tween(opacity).to(0.22, { opacity: 255 }, { easing: 'sineOut' }).start();
+        tween(killer)
+            .to(0.38, { scale: new Vec3(finalScale.x * 1.08, finalScale.y * 1.08, finalScale.z) }, { easing: 'backOut' })
+            .to(0.2, { scale: finalScale }, { easing: 'sineOut' })
+            .start();
+        this.scheduleOnce(() => this.showCTA(), 1.2);
+    }
+
+    private showCTA() {
+        if (this.ctaShown) return;
+        this.ctaShown = true;
+        const ctaCanvas = director.getScene()?.getChildByName('CTA') ?? null;
+        if (!ctaCanvas) {
+            if (this.failScreen) this.failScreen.active = true;
+            return;
+        }
+
+        ctaCanvas.active = true;
+        const backdrop = ctaCanvas.getChildByName('SpriteSplash') ?? ctaCanvas;
+        backdrop.active = true;
+        const backdropOpacity = backdrop.getComponent(UIOpacity) ?? backdrop.addComponent(UIOpacity);
+        backdropOpacity.opacity = 0;
+        tween(backdropOpacity).to(0.38, { opacity: 255 }, { easing: 'sineOut' }).start();
+        this.revealCTAElement(ctaCanvas.getChildByName('Icon1024'), 0.24, 0.72);
+        this.revealCTAElement(ctaCanvas.getChildByName('ProfilePerfect'), 0.56, 0.7);
+        this.revealCTAElement(ctaCanvas.getChildByName('play now'), 0.9, 0.78, true);
+    }
+
+    private revealCTAElement(node: Node | null, delay: number, startScale: number, swing = false) {
+        if (!node) return;
+        node.active = true;
+        const finalScale = node.scale.clone();
+        const finalRotation = node.eulerAngles.clone();
+        const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
+        opacity.opacity = 0;
+        node.setScale(finalScale.x * startScale, finalScale.y * startScale, finalScale.z);
+        tween(opacity).delay(delay).to(0.2, { opacity: 255 }, { easing: 'sineOut' }).start();
+        tween(node)
+            .delay(delay)
+            .to(0.32, { scale: new Vec3(finalScale.x * 1.08, finalScale.y * 1.08, finalScale.z) }, { easing: 'backOut' })
+            .to(0.16, { scale: finalScale }, { easing: 'sineOut' })
+            .call(() => {
+                if (!swing) return;
+                tween(node)
+                    .repeatForever(
+                        tween()
+                            .to(0.35, { eulerAngles: new Vec3(finalRotation.x, finalRotation.y, finalRotation.z - 7) }, { easing: 'sineInOut' })
+                            .to(0.7, { eulerAngles: new Vec3(finalRotation.x, finalRotation.y, finalRotation.z + 7) }, { easing: 'sineInOut' })
+                            .to(0.35, { eulerAngles: finalRotation }, { easing: 'sineInOut' }),
+                    )
+                    .start();
+            })
+            .start();
     }
 }
