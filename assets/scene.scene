@@ -8153,7 +8153,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 0,
-      "y": -206.46,
+      "y": -175.182,
       "z": 0
     },
     "_lrot": {
@@ -8165,9 +8165,9 @@
     },
     "_lscale": {
       "__type__": "cc.Vec3",
-      "x": 1,
-      "y": 1,
-      "z": 1
+      "x": 0.902,
+      "y": 0.902,
+      "z": 0.902
     },
     "_mobility": 0,
     "_layer": 33554432,
@@ -8191,8 +8191,8 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 355.8041015625,
-      "height": 79.41199999999999
+      "width": 441.9168701171875,
+      "height": 84.812
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -8224,8 +8224,8 @@
     "_string": "Drag and Drop!",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
-    "_actualFontSize": 49.9,
-    "_fontSize": 49.9,
+    "_actualFontSize": 61.5,
+    "_fontSize": 61.5,
     "_fontFamily": "Arial",
     "_lineHeight": 56.2,
     "_overflow": 0,
@@ -8249,7 +8249,7 @@
       "b": 0,
       "a": 255
     },
-    "_outlineWidth": 4.3,
+    "_outlineWidth": 7,
     "_enableShadow": false,
     "_shadowColor": {
       "__type__": "cc.Color",
@@ -8870,6 +8870,7 @@
       "__uuid__": "62414101-f989-4621-abc6-3a805d688749",
       "__expectedType__": "cc.AudioClip"
     },
+    "flyClip": null,
     "bgmVolume": 0.05,
     "idleHintDelay": 7,
     "_id": "bfRgyr17NNbpl154Wdbyi4"

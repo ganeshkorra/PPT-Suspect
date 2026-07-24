@@ -47,6 +47,7 @@ export class GameManager extends Component {
     @property(AudioClip) public dropClip: AudioClip | null = null;
     @property(AudioClip) public matchClip: AudioClip | null = null;
     @property(AudioClip) public swapClip: AudioClip | null = null;
+    @property(AudioClip) public flyClip: AudioClip | null = null;
     @property({ tooltip: 'Master volume for BGM (0-1)' }) public bgmVolume = 0.45;
 
     private readonly cardHomes = new Map<PersonCard, CardHome>();
@@ -134,6 +135,20 @@ export class GameManager extends Component {
         const src = this.ensureSfxSource();
         if (!src || !this.holdClip) return;
         try { src.playOneShot(this.holdClip); } catch (e) { /* ignore */ }
+    }
+
+    private tutorialHoldTick = () => {
+        if (!this.tutorialActive) {
+            try { this.unschedule(this.tutorialHoldTick); } catch (e) { /* ignore */ }
+            return;
+        }
+        this.playHoldSound();
+    };
+
+    private playFlySound(): void {
+        const src = this.ensureSfxSource();
+        if (!src || !this.flyClip) return;
+        try { src.playOneShot(this.flyClip); } catch (e) { /* ignore */ }
     }
 
     private playDropSound(): void {
@@ -249,7 +264,12 @@ export class GameManager extends Component {
     private playGameplayPresentation() {
         const suspectPanel = this.getSuspectPanel();
         if (suspectPanel) this.playPresentationNode(suspectPanel, 0, 0.28);
-        this.personCards.forEach((card, index) => this.playPresentationNode(card.node, 0.14 + index * 0.055, 0.24));
+        this.personCards.forEach((card, index) => {
+            const delay = 0.14 + index * 0.055;
+            this.playPresentationNode(card.node, delay, 0.24);
+            // schedule fly sound to match the card animation
+            this.scheduleOnce(() => this.playFlySound(), delay);
+        });
         this.witnesses.forEach((witness, index) => {
             if (witness.witnessRoot) this.playPresentationNode(witness.witnessRoot, 0.82 + index * 0.18, 0.3);
         });
@@ -376,6 +396,9 @@ export class GameManager extends Component {
 
         // start tutorial hand animation immediately
         tutorialController.playTutorial(tutorialTarget, dropTarget);
+        // schedule hold sound to play in sync with the hand click repeatedly until the tutorial hides
+        try { this.unschedule(this.tutorialHoldTick); } catch (e) { /* ignore */ }
+        this.schedule(this.tutorialHoldTick, 1.83, 999999, 0.3);
         // unlock quickly so user can interact with hint
         this.locked = false;
     }
@@ -397,6 +420,7 @@ export class GameManager extends Component {
         if (tutorialTarget) {
             Tween.stopAllByTarget(tutorialTarget);
         }
+        try { this.unschedule(this.tutorialHoldTick); } catch (e) { /* ignore */ }
     }
 
 
