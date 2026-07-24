@@ -1,4 +1,5 @@
-import { _decorator, Color, Component, director, EventTouch, Label, Node, Sprite, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, AudioClip, AudioSource, Color, Component, director, EventTouch, Label, Node, Sprite, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { Graphics } from 'cc';
 import { Analytics, analyticsEvents } from './Analytics';
 import { PersonCard } from './PersonCard';
 import { TutorialController } from './TutorialController';
@@ -39,6 +40,14 @@ export class GameManager extends Component {
     @property(Node) public failScreen: Node | null = null;
     // @property(Node) public killerNode: Node | null = null;
     @property(Node) public ctaNode: Node | null = null;
+    @property(AudioSource) public bgmSource: AudioSource | null = null;
+    @property(AudioSource) public sfxSource: AudioSource | null = null;
+    @property(AudioClip) public bgmClip: AudioClip | null = null;
+    @property(AudioClip) public holdClip: AudioClip | null = null;
+    @property(AudioClip) public dropClip: AudioClip | null = null;
+    @property(AudioClip) public matchClip: AudioClip | null = null;
+    @property(AudioClip) public swapClip: AudioClip | null = null;
+    @property({ tooltip: 'Master volume for BGM (0-1)' }) public bgmVolume = 0.45;
 
     private readonly cardHomes = new Map<PersonCard, CardHome>();
     private readonly slotOccupants = new Map<Node, PersonCard>();
@@ -84,6 +93,67 @@ export class GameManager extends Component {
         });
         this.prepareGameplayPresentation();
         this.showIntro();
+    }
+
+    private ensureSfxSource(): AudioSource | null {
+        if (this.sfxSource && this.sfxSource.isValid) return this.sfxSource;
+        let src = this.node.getComponent(AudioSource) ?? null;
+        if (!src) src = this.node.addComponent(AudioSource);
+        this.sfxSource = src;
+        return src;
+    }
+
+    private ensureBgmSource(): AudioSource | null {
+        if (this.bgmSource && this.bgmSource.isValid) return this.bgmSource;
+        let src = this.bgmSource ?? null;
+        if (!src) {
+            try {
+                src = this.node.addComponent(AudioSource);
+            } catch (e) {
+                src = this.node.getComponent(AudioSource) ?? null;
+            }
+        }
+        this.bgmSource = src;
+        return src;
+    }
+
+    private bgmStarted = false;
+
+    private playBGM(): void {
+        if (this.bgmStarted) return;
+        const src = this.ensureBgmSource();
+        if (!src || !this.bgmClip) return;
+        src.clip = this.bgmClip;
+        src.loop = true;
+        src.volume = Math.max(0, Math.min(1, this.bgmVolume));
+        src.play();
+        this.bgmStarted = true;
+    }
+
+    private playHoldSound(): void {
+        const src = this.ensureSfxSource();
+        if (!src || !this.holdClip) return;
+        try { src.playOneShot(this.holdClip); } catch (e) { /* ignore */ }
+    }
+
+    private playDropSound(): void {
+        const src = this.ensureSfxSource();
+        if (!src || !this.dropClip) return;
+        try { src.playOneShot(this.dropClip); } catch (e) { /* ignore */ }
+    }
+
+    private playSwapSound(): void {
+        const src = this.ensureSfxSource();
+        if (!src || !this.swapClip) return;
+        try { src.playOneShot(this.swapClip); } catch (e) { /* ignore */ }
+    }
+
+    private playMatchSound(): void {
+        console.log('playMatchSound called', !!this.matchClip);
+        const src = this.ensureSfxSource();
+        if (!src) { console.log('no sfx source'); return; }
+        if (!this.matchClip) { console.log('no matchClip assigned'); return; }
+        try { src.playOneShot(this.matchClip); } catch (e) { console.log('playMatchSound error', e); }
     }
 
     onDestroy() {
@@ -508,6 +578,9 @@ export class GameManager extends Component {
         this.pressedCard = card;
         this.pressPosition.set(location.x, location.y, 0);
         this.resetIdleTimer();
+        // audio: start BGM on first interaction and play hold sound
+        this.playBGM();
+        this.playHoldSound();
     }
 
     private onCardMove(event: EventTouch) {
@@ -588,10 +661,14 @@ export class GameManager extends Component {
     private placeCard(card: PersonCard, slot: Node, witness: WitnessCase) {
         this.locked = true;
         const previousCard = this.slotOccupants.get(slot);
+        const isSwap = !!previousCard && previousCard !== card;
         if (previousCard && previousCard !== card) this.returnCardHome(previousCard, true);
         card.node.setParent(slot, true);
         card.hideSourceButton();
         this.slotOccupants.set(slot, card);
+        // audio: placed into a slot
+        this.playDropSound();
+        if (isSwap) this.playSwapSound();
 
         if (!card.matches(witness.requiredPersonIds)) {
             card.setLockedInSlot(false);
@@ -656,6 +733,10 @@ export class GameManager extends Component {
     }
 
     private completeWitness(witness: WitnessCase) {
+        console.log('completeWitness called for witness', witness?.name ?? this.currentWitnessIndex);
+        // audio: play match sound when witness case completes
+        this.playMatchSound();
+
         this.playWitnessExit(witness, () => {
             witness.complete();
             this.currentWitnessIndex++;
@@ -712,6 +793,54 @@ export class GameManager extends Component {
         suspect.node.on(Node.EventType.TOUCH_END, this.winLevel, this);
     }
 
+    private createConfettiBlast(origin?: Vec3 | Node, count = 24) {
+        console.log('createConfettiBlast called', origin, count);
+        const sceneRoot = director.getScene() ?? this.node;
+        let center: Vec3;
+        if (!origin) center = this.node.worldPosition.clone();
+        else if ((origin as Node).worldPosition) center = ((origin as Node).worldPosition).clone();
+        else center = (origin as Vec3).clone();
+
+        const colors = [
+            new Color(255, 84, 84, 255),
+            new Color(255, 195, 0, 255),
+            new Color(86, 196, 255, 255),
+            new Color(123, 255, 132, 255),
+            new Color(201, 121, 255, 255),
+        ];
+
+        for (let i = 0; i < count; i++) {
+            const conf = new Node('confetti');
+            try {
+                if (sceneRoot && (sceneRoot as any).addChild) (sceneRoot as Node).addChild(conf);
+                else this.node.addChild(conf);
+            } catch (e) { this.node.addChild(conf); }
+            const g = conf.addComponent(Graphics);
+            const c = colors[Math.floor(Math.random() * colors.length)];
+            g.fillColor = c;
+            g.rect(-4, -6, 8, 12);
+            g.fill();
+            const opacity = conf.getComponent(UIOpacity) ?? conf.addComponent(UIOpacity);
+            opacity.opacity = 255;
+            // Parent to scene root and set world position so tweening worldPosition works
+            try { conf.setWorldPosition(center); } catch (e) { try { conf.setPosition(center); } catch (e2) { /* ignore */ } }
+
+            const vx = (Math.random() * 2 - 1) * 220;
+            const vy = 150 + Math.random() * 320;
+            const rot = (Math.random() * 2 - 1) * 720;
+            const mid = new Vec3(center.x + vx * 0.5, center.y + vy * 0.5 - 80, center.z);
+            const end = new Vec3(center.x + vx * 1.1, center.y - 120 - Math.random() * 80, center.z);
+
+            tween(conf)
+                .to(0.6, { worldPosition: mid, eulerAngles: new Vec3(0, 0, rot) }, { easing: 'cubicOut' })
+                .to(0.6, { worldPosition: end, eulerAngles: new Vec3(0, 0, rot * 2) }, { easing: 'cubicIn' })
+                .call(() => { try { conf.destroy(); } catch (e) { /* ignore */ } })
+                .start();
+
+            tween(opacity).delay(0.6).to(0.8, { opacity: 0 }, { easing: 'sineIn' }).start();
+        }
+    }
+
     private winLevel() {
         if (this.locked || this.gameFinished) return;
         this.finishMatchAndShowCTA();
@@ -728,7 +857,16 @@ export class GameManager extends Component {
             Analytics.safeDispatch(analyticsEvents.CHALLENGE_SOLVED);
             console.log('challenge completed');
         }
-        this.showCTA();
+        // audio: ensure match sound plays on final win
+        try { this.playMatchSound(); } catch (e) { /* ignore */ }
+
+        // Always show confetti on win to celebrate
+        try {
+            console.log('Winning: triggering confetti');
+            this.createConfettiBlast(undefined, 36);
+        } catch (e) { /* ignore confetti errors */ }
+        // Delay CTA by 0.5s to give final animations a moment when player wins
+        try { this.scheduleOnce(() => this.showCTA(), 0.5); } catch (e) { this.showCTA(); }
     }
 
     private showKillerThenCTA() {
@@ -738,6 +876,15 @@ export class GameManager extends Component {
 
     private showCTA() {
         if (this.ctaShown) return;
+        // stop BGM when showing CTA
+        try { if (this.bgmSource && this.bgmSource.isValid) this.bgmSource.stop(); } catch (e) { /* ignore */ }
+        // also try to stop common audio sources (camera nodes)
+        try {
+            const mainAudio = director.getScene()?.getChildByName('Canvas-001')?.getChildByName('GameCamera')?.getComponent(AudioSource)
+                || director.getScene()?.getChildByName('Canvas')?.getChildByName('Camera')?.getComponent(AudioSource)
+                || this.findNodeInSceneByName('Canvas')?.getComponent(AudioSource);
+            if (mainAudio) mainAudio.stop();
+        } catch (e) { /* ignore */ }
         this.ctaShown = true;
         const uiCanvas = director.getScene()?.getChildByName('Canvas') ?? this.findNodeInSceneByName('Canvas');
 
