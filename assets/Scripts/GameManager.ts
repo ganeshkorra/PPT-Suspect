@@ -440,68 +440,52 @@ export class GameManager extends Component {
     }
 
     private playWitnessExit(witness: WitnessCase, onComplete: () => void) {
-        // Collect slot panels and any occupant card nodes so we animate visuals, not just containers
         const slotPanels = this.getCurrentSlotPanels();
         const cardNodes: Node[] = [];
         for (const slot of witness.innocentSlots) {
             const occupant = this.slotOccupants.get(slot);
             if (occupant && occupant.node && (occupant.node as any).isValid) {
-                // Detach the card so the slot can be hidden independently (avoids instant disappearance)
                 this.removeCardFromSlot(occupant);
                 occupant.setLockedInSlot(false);
-                occupant.node.setParent(this.node, true);
                 cardNodes.push(occupant.node);
             }
         }
 
-        // Build node list and guard against unexpected types (some entries in AppLovin preview can be non-Node)
-        const nodes = [witness.witnessRoot, ...slotPanels, ...cardNodes].filter((n): n is Node => n !== null && typeof (n as any).getComponent === 'function');
+        const group = new Node('witness_exit_group');
+        try { group.setParent(this.node, true); } catch (e) { try { director.getScene()?.addChild(group); } catch (e2) { /* ignore */ } }
+        group.setScale(1, 1, 1);
 
-        nodes.forEach((node, index) => {
-            try {
-                const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
-                if (!opacity) return;
+        const members: Node[] = [];
+        if (witness.witnessRoot) members.push(witness.witnessRoot);
+        members.push(...slotPanels);
+        members.push(...cardNodes);
+        members.push(...witness.clueElements);
 
-                // Stop any existing tweens to avoid conflicts
-                try { (Tween as any).stopAllByTarget?.(node); } catch (e) { /* ignore */ }
-
-                const position = node.position.clone();
-                const scale = node.scale.clone();
-                const eulerAngles = node.eulerAngles.clone();
-
-                // Smoother timings and easings: gentle pop, then smooth fly-away
-                const popDuration = 0.18;
-                const flyDuration = 0.52;
-                const stagger = 0.06;
-
-                tween(node)
-                    .delay(index * stagger)
-                    .to(popDuration, { scale: new Vec3(scale.x * 1.06, scale.y * 1.06, scale.z) }, { easing: 'backOut' })
-                    .to(flyDuration, {
-                        position: new Vec3(position.x + 160, position.y + 160, position.z),
-                        scale: new Vec3(scale.x * 0.72, scale.y * 0.72, scale.z),
-                        eulerAngles: new Vec3(eulerAngles.x, eulerAngles.y, eulerAngles.z - 20),
-                    }, { easing: 'cubicIn' })
-                    .start();
-
-                // Fade aligned with the movement for a smooth dissolve
-                tween(opacity)
-                    .delay(popDuration * 0.5 + index * stagger)
-                    .to(flyDuration + 0.2, { opacity: 0 }, { easing: 'sineInOut' })
-                    .start();
-            } catch (e) {
-                // Ignore any nodes that are not tweenable in the AppLovin environment
-            }
+        const safeMembers = members.filter((n): n is Node => !!n && typeof (n as any).getComponent === 'function');
+        safeMembers.forEach((member) => {
+            try { Tween.stopAllByTarget?.(member); } catch (e) { /* ignore */ }
+            try { member.setParent(group, true); } catch (e) { /* ignore */ }
+            const opacity = member.getComponent(UIOpacity) ?? member.addComponent(UIOpacity);
+            opacity.opacity = 255;
+            tween(opacity).delay(0.16).to(0.85, { opacity: 0 }, { easing: 'sineOut' }).start();
         });
 
-        // Wait a bit longer when more nodes are animated so they finish before we call onComplete
-        const baseFinish = 0.9; // give the tweens room to complete
-        const maxDelay = nodes.length > 0 ? baseFinish + (nodes.length - 1) * 0.06 : baseFinish;
+        const startPos = group.position.clone();
+        const startRot = group.eulerAngles.clone();
+        const peakPos = new Vec3(startPos.x + 65, startPos.y + 150, startPos.z);
+        const endPos = new Vec3(startPos.x + 210, startPos.y + 85, startPos.z);
+
+        tween(group)
+            .to(0, { scale: new Vec3(1.03, 1.03, 1) }, { easing: 'backOut' })
+            //.to(0., { position: peakPos, eulerAngles: new Vec3(startRot.x, startRot.y, startRot.z - 8) }, { easing: 'cubicOut' })
+           // .to(0.55, { position: endPos, scale: new Vec3(0.68, 0.68, 1), eulerAngles: new Vec3(startRot.x, startRot.y, startRot.z - 18) }, { easing: 'cubicInOut' })
+            .start();
+
         this.scheduleOnce(() => {
-            // Hide detached card nodes after animation completes
-            cardNodes.forEach((n) => { if ((n as any).isValid) n.active = false; });
+            try { safeMembers.forEach((m) => { if ((m as any).isValid) m.active = false; }); } catch (e) { /* ignore */ }
+            try { group.removeFromParent(); } catch (e) { /* ignore */ }
             onComplete();
-        }, maxDelay);
+        }, 0.2);
     }
 
     private beginDrag(event: EventTouch) {
