@@ -32,7 +32,7 @@ export class CTAButtonHandler extends Component {
                 this.onMraidReady();
             }
         } else {
-            console.log("MRAID library not found. Waiting for Google ExitApi or browser fallback.");
+            // No MRAID available; fallback paths will be used later.
         }
     }
 
@@ -45,11 +45,8 @@ export class CTAButtonHandler extends Component {
      */
     private getTargetStoreUrl(): string {
         if (sys.os === sys.OS.IOS) {
-            console.log("Device detected: iOS");
             return this.iosStoreUrl;
         } else {
-            // Default to Android for Android devices, Desktop browsers, and others
-            console.log("Device detected: Android/Other");
             return this.androidStoreUrl;
         }
     }
@@ -59,13 +56,9 @@ export class CTAButtonHandler extends Component {
      */
     public onStoreButtonClicked(): void {
         const targetUrl = this.getTargetStoreUrl();
-        console.log("CTA Triggered. Target URL:", targetUrl);
 
         // Fire CTA_CLICKED event
-        if (Analytics.instance) {
-            Analytics.instance.dispatchEvent(analyticsEvents.CTA_CLICKED);
-            console.log("[Analytics] CTA_CLICKED event fired");
-        }
+        Analytics.safeDispatch(analyticsEvents.CTA_CLICKED);
 
         // 1. Stop audio before redirecting (Technical requirement)
         const mainAudio =
@@ -82,26 +75,22 @@ export class CTAButtonHandler extends Component {
 
         // 2. Google playable ads require ExitApi.exit() for clickthroughs.
         if (exitApi && typeof exitApi.exit === "function") {
-            console.log("Calling Google ExitApi.exit()");
             exitApi.exit();
             return;
         }
 
         // 3. Super HTML's Google wrapper also routes download() to ExitApi.exit().
         if (superHtml && typeof superHtml.download === "function") {
-            console.log("Calling super_html.download()");
             superHtml.download(targetUrl);
             return;
         }
 
         // 4. Redirect using MRAID if available
         if (mraid && typeof mraid.open === "function") {
-            console.log("Calling mraid.open()");
             mraid.open(targetUrl);
         } 
         // 5. Browser fallback for local/custom environments that do not expose an ad SDK.
         else {
-            console.log("No ad click API available. Calling window.open()");
             adWindow.open(targetUrl, "_blank");
         }
     }

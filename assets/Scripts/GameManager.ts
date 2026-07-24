@@ -1,4 +1,5 @@
 import { _decorator, Color, Component, director, EventTouch, Label, Node, Sprite, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { Analytics, analyticsEvents } from './Analytics';
 import { PersonCard } from './PersonCard';
 import { TutorialController } from './TutorialController';
 import { WitnessCase } from './WitnessCase';
@@ -32,7 +33,7 @@ export class GameManager extends Component {
     @property(Node) public tutorialHandTarget: Node | null = null;
     @property(Node) public tutorialDropTarget: Node | null = null;
     @property public tutorialDuration = 2.5;
-    @property public initialTutorialDelay = 1.2; // earlier show for initial tutorial
+    @property public initialTutorialDelay = 0.3; // earlier show for initial tutorial
     @property public gameDuration = 45;
     @property(Label) public timerLabel: Label | null = null;
     @property(Node) public failScreen: Node | null = null;
@@ -53,6 +54,8 @@ export class GameManager extends Component {
     private remainingSeconds = 0;
     private timerStarted = false;
     private ctaShown = false;
+    private challengeStarted = false;
+    private readonly passedThresholds = new Set<analyticsEvents>();
     @property public idleHintDelay = 7; // seconds before showing idle hint after game starts
     private readonly idleTimeoutCallback = () => this.handleIdleTimeout();
     private readonly timerTick = () => this.updateTimerLabel();
@@ -71,6 +74,7 @@ export class GameManager extends Component {
     }
 
     start() {
+        Analytics.safeDispatch(analyticsEvents.LOADING);
         this.locked = true;
         if (this.timerLabel) this.timerLabel.string = `${Math.max(0, Math.ceil(this.gameDuration))}s`;
         this.personCards.forEach((card) => this.registerCard(card));
@@ -156,6 +160,7 @@ export class GameManager extends Component {
         }, Math.max(0.2, this.introDuration - 0.42));
         this.scheduleOnce(() => {
             introCanvas.active = false;
+            Analytics.safeDispatch(analyticsEvents.LOADED);
             this.playGameplayPresentation();
         }, this.introDuration);
     }
@@ -180,6 +185,7 @@ export class GameManager extends Component {
         });
         this.getCurrentSlotPanels().forEach((panel, index) => this.playPresentationNode(panel, 1.48 + index * 0.06, 0.34));
         this.scheduleOnce(() => this.revealCurrentClue(), 1.98);
+        Analytics.safeDispatch(analyticsEvents.DISPLAYED);
         this.scheduleOnce(() => this.showTutorial(true), this.initialTutorialDelay);
     }
 
@@ -386,6 +392,9 @@ export class GameManager extends Component {
         this.stopGameTimer();
         this.hideTutorial();
         try { this.unschedule(this.idleTimeoutCallback); } catch (e) { /* ignore */ }
+        if (this.challengeStarted) {
+            Analytics.safeDispatch(analyticsEvents.CHALLENGE_FAILED);
+        }
         this.showCTA();
     }
 
@@ -431,24 +440,68 @@ export class GameManager extends Component {
     }
 
     private playWitnessExit(witness: WitnessCase, onComplete: () => void) {
-        const nodes = [witness.witnessRoot, ...this.getCurrentSlotPanels()].filter((node): node is Node => node !== null);
+        // Collect slot panels and any occupant card nodes so we animate visuals, not just containers
+        const slotPanels = this.getCurrentSlotPanels();
+        const cardNodes: Node[] = [];
+        for (const slot of witness.innocentSlots) {
+            const occupant = this.slotOccupants.get(slot);
+            if (occupant && occupant.node && (occupant.node as any).isValid) {
+                // Detach the card so the slot can be hidden independently (avoids instant disappearance)
+                this.removeCardFromSlot(occupant);
+                occupant.setLockedInSlot(false);
+                occupant.node.setParent(this.node, true);
+                cardNodes.push(occupant.node);
+            }
+        }
+
+        // Build node list and guard against unexpected types (some entries in AppLovin preview can be non-Node)
+        const nodes = [witness.witnessRoot, ...slotPanels, ...cardNodes].filter((n): n is Node => n !== null && typeof (n as any).getComponent === 'function');
+
         nodes.forEach((node, index) => {
-            const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
-            const position = node.position.clone();
-            const scale = node.scale.clone();
-            const eulerAngles = node.eulerAngles.clone();
-            tween(node)
-                .delay(index * 0.04)
-                .to(0.1, { scale: new Vec3(scale.x * 1.08, scale.y * 1.08, scale.z) }, { easing: 'quadOut' })
-                .to(0.38, {
-                    position: new Vec3(position.x + 145, position.y + 145, position.z),
-                    scale: new Vec3(scale.x * 0.7, scale.y * 0.7, scale.z),
-                    eulerAngles: new Vec3(eulerAngles.x, eulerAngles.y, eulerAngles.z - 18),
-                }, { easing: 'quadIn' })
-                .start();
-            tween(opacity).delay(0.08 + index * 0.04).to(0.42, { opacity: 0 }, { easing: 'sineIn' }).start();
+            try {
+                const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
+                if (!opacity) return;
+
+                // Stop any existing tweens to avoid conflicts
+                try { (Tween as any).stopAllByTarget?.(node); } catch (e) { /* ignore */ }
+
+                const position = node.position.clone();
+                const scale = node.scale.clone();
+                const eulerAngles = node.eulerAngles.clone();
+
+                // Smoother timings and easings: gentle pop, then smooth fly-away
+                const popDuration = 0.18;
+                const flyDuration = 0.52;
+                const stagger = 0.06;
+
+                tween(node)
+                    .delay(index * stagger)
+                    .to(popDuration, { scale: new Vec3(scale.x * 1.06, scale.y * 1.06, scale.z) }, { easing: 'backOut' })
+                    .to(flyDuration, {
+                        position: new Vec3(position.x + 160, position.y + 160, position.z),
+                        scale: new Vec3(scale.x * 0.72, scale.y * 0.72, scale.z),
+                        eulerAngles: new Vec3(eulerAngles.x, eulerAngles.y, eulerAngles.z - 20),
+                    }, { easing: 'cubicIn' })
+                    .start();
+
+                // Fade aligned with the movement for a smooth dissolve
+                tween(opacity)
+                    .delay(popDuration * 0.5 + index * stagger)
+                    .to(flyDuration + 0.2, { opacity: 0 }, { easing: 'sineInOut' })
+                    .start();
+            } catch (e) {
+                // Ignore any nodes that are not tweenable in the AppLovin environment
+            }
         });
-        this.scheduleOnce(onComplete, 0.56);
+
+        // Wait a bit longer when more nodes are animated so they finish before we call onComplete
+        const baseFinish = 0.9; // give the tweens room to complete
+        const maxDelay = nodes.length > 0 ? baseFinish + (nodes.length - 1) * 0.06 : baseFinish;
+        this.scheduleOnce(() => {
+            // Hide detached card nodes after animation completes
+            cardNodes.forEach((n) => { if ((n as any).isValid) n.active = false; });
+            onComplete();
+        }, maxDelay);
     }
 
     private beginDrag(event: EventTouch) {
@@ -456,6 +509,10 @@ export class GameManager extends Component {
         const card = (event.currentTarget as Node).getComponent(PersonCard);
         if (!card || !card.node.active || card.isLockedInSlot) return;
         this.startGameTimer();
+        if (!this.challengeStarted) {
+            this.challengeStarted = true;
+            Analytics.safeDispatch(analyticsEvents.CHALLENGE_STARTED);
+        }
         this.hideTutorial();
         const location = event.getUILocation();
         this.pressedCard = card;
@@ -612,6 +669,7 @@ export class GameManager extends Component {
         this.playWitnessExit(witness, () => {
             witness.complete();
             this.currentWitnessIndex++;
+            this.dispatchChallengePassEvents();
             const nextWitness = this.witnesses[this.currentWitnessIndex];
             if (nextWitness) {
                 nextWitness.configure(true, false);
@@ -624,12 +682,38 @@ export class GameManager extends Component {
         });
     }
 
+    private dispatchChallengePassEvents() {
+        const total = this.witnesses.length;
+        if (!total) return;
+
+        const completed = Math.min(this.currentWitnessIndex, total);
+        const progress = Math.round((completed / total) * 100);
+        const thresholds: Array<{ value: number; event: analyticsEvents }> = [
+            { value: 25, event: analyticsEvents.CHALLENGE_PASS_25 },
+            { value: 50, event: analyticsEvents.CHALLENGE_PASS_50 },
+            { value: 75, event: analyticsEvents.CHALLENGE_PASS_75 },
+        ];
+
+        for (const threshold of thresholds) {
+            if (progress >= threshold.value && !this.passedThresholds.has(threshold.event)) {
+                this.passedThresholds.add(threshold.event);
+                Analytics.safeDispatch(threshold.event);
+            }
+        }
+    }
+
     private showSuspect() {
         const suspect = this.personCards.find((card) => card.isSuspect);
         this.personCards.forEach((card) => {
             if (card !== suspect && card.node.active) card.node.active = false;
         });
-        if (!suspect) return console.warn('GameManager: assign one PersonCard as the suspect.');
+        if (!suspect) return;
+
+        if (!this.passedThresholds.has(analyticsEvents.CHALLENGE_PASS_75)) {
+            this.passedThresholds.add(analyticsEvents.CHALLENGE_PASS_75);
+            Analytics.safeDispatch(analyticsEvents.CHALLENGE_PASS_75);
+        }
+
         this.locked = false;
         suspect.node.setParent(this.node, true);
         suspect.node.setSiblingIndex(this.node.children.length - 1);
@@ -650,7 +734,10 @@ export class GameManager extends Component {
         this.stopGameTimer();
         this.hideTutorial();
         try { this.unschedule(this.idleTimeoutCallback); } catch (e) { /* ignore */ }
-        console.log('GameManager: finishMatchAndShowCTA - showing CTA');
+        if (this.challengeStarted) {
+            Analytics.safeDispatch(analyticsEvents.CHALLENGE_SOLVED);
+            console.log('challenge completed');
+        }
         this.showCTA();
     }
 
@@ -662,7 +749,6 @@ export class GameManager extends Component {
     private showCTA() {
         if (this.ctaShown) return;
         this.ctaShown = true;
-        console.log('GameManager: showCTA called');
         const uiCanvas = director.getScene()?.getChildByName('Canvas') ?? this.findNodeInSceneByName('Canvas');
 
         let ctaCanvas = this.ctaNode
@@ -672,7 +758,6 @@ export class GameManager extends Component {
             ?? null;
 
         if (!ctaCanvas) {
-            console.log('GameManager: CTA node not found — creating visible runtime CTA.');
             // create a more visible runtime CTA so the endscreen always appears
             ctaCanvas = new Node('CTA_runtime');
             if (uiCanvas) uiCanvas.addChild(ctaCanvas);
@@ -701,7 +786,6 @@ export class GameManager extends Component {
 
             // Make the runtime CTA clickable: tapping will try to call CTAButtonHandler if present
             ctaCanvas.on(Node.EventType.TOUCH_END, () => {
-                console.log('GameManager: runtime CTA tapped');
                 let handlerComp: Component | null = null;
 
                 // Try common locations first
@@ -724,9 +808,7 @@ export class GameManager extends Component {
 
                 if (handlerComp && typeof (handlerComp as any).onCTA === 'function') {
                     try { (handlerComp as any).onCTA(); }
-                    catch (e) { console.warn('GameManager: CTA handler call failed', e); }
-                } else {
-                    console.log('GameManager: CTA handler not found; runtime CTA tapped.');
+                    catch (e) { /* ignore CTA handler errors */ }
                 }
             }, this);
         }
@@ -737,10 +819,9 @@ export class GameManager extends Component {
             // Bring CTA to front
             if (ctaCanvas.parent) ctaCanvas.setSiblingIndex(ctaCanvas.parent.children.length - 1);
         } catch (e) {
-            console.warn('GameManager: failed to reparent/move CTA', e);
+            /* ignore CTA reparenting errors */
         }
-
-        console.log('GameManager: showing CTA node', ctaCanvas.name);
+        Analytics.safeDispatch(analyticsEvents.ENDCARD_SHOWN);
 
         // Ensure visibility: enable node, children, and opacities
         ctaCanvas.active = true;

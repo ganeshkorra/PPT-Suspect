@@ -48,15 +48,19 @@ export class Analytics extends Component {
      * Sends the event to AppLovin if the SDK is present, otherwise dispatches to the browser.
      */
     public dispatchEvent(eventName: analyticsEvents | string) {
+        Analytics.safeDispatch(eventName, false);
+    }
+
+    public static safeDispatch(eventName: analyticsEvents | string, logFallback = true) {
         // Track event count for debugging
         const currentCount = (Analytics.eventCounts.get(eventName) || 0) + 1;
         Analytics.eventCounts.set(eventName, currentCount);
         console.log(`[Analytics] Event "${eventName}" sent (Total: ${currentCount})`);
 
-        if (window.ALPlayableAnalytics && typeof window.ALPlayableAnalytics.trackEvent === "function") {
+        if (typeof window !== 'undefined' && window.ALPlayableAnalytics && typeof window.ALPlayableAnalytics.trackEvent === 'function') {
             window.ALPlayableAnalytics.trackEvent(eventName);
             console.log(`[AL Analytics] Sent: ${eventName}`);
-        } else {
+        } else if (logFallback && typeof window !== 'undefined') {
             // Local fallback for testing in browser console
             window.dispatchEvent(new Event(eventName));
             console.warn(`[Analytics Fallback] SDK Not Found. Dispatched Browser Event: ${eventName}`);

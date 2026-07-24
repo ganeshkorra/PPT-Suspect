@@ -24,7 +24,7 @@ export class PersonCard extends Component {
     }
 
     public matches(requiredIds: string[]) {
-        return requiredIds.length > 0 && requiredIds.every((requiredId) => this.personIds.includes(requiredId));
+        return requiredIds.length > 0 && requiredIds.every((requiredId) => this.personIds.indexOf(requiredId) !== -1);
     }
 
     public setIncorrect(isIncorrect: boolean) {
