@@ -32,6 +32,7 @@ export class GameManager extends Component {
     @property(Node) public tutorialHandTarget: Node | null = null;
     @property(Node) public tutorialDropTarget: Node | null = null;
     @property public tutorialDuration = 2.5;
+    @property public initialTutorialDelay = 1.2; // earlier show for initial tutorial
     @property public gameDuration = 45;
     @property(Label) public timerLabel: Label | null = null;
     @property(Node) public failScreen: Node | null = null;
@@ -52,6 +53,8 @@ export class GameManager extends Component {
     private remainingSeconds = 0;
     private timerStarted = false;
     private ctaShown = false;
+    @property public idleHintDelay = 7; // seconds before showing idle hint after game starts
+    private readonly idleTimeoutCallback = () => this.handleIdleTimeout();
     private readonly timerTick = () => this.updateTimerLabel();
     private readonly timerExpired = () => this.failLevel();
 
@@ -88,6 +91,7 @@ export class GameManager extends Component {
         });
         this.unschedule(this.timerTick);
         this.unschedule(this.timerExpired);
+        try { this.unschedule(this.idleTimeoutCallback); } catch (e) { /* ignore */ }
     }
 
     private registerCard(card: PersonCard) {
@@ -176,7 +180,7 @@ export class GameManager extends Component {
         });
         this.getCurrentSlotPanels().forEach((panel, index) => this.playPresentationNode(panel, 1.48 + index * 0.06, 0.34));
         this.scheduleOnce(() => this.revealCurrentClue(), 1.98);
-        this.scheduleOnce(() => this.showTutorial(), 2.34);
+        this.scheduleOnce(() => this.showTutorial(true), this.initialTutorialDelay);
     }
 
     private getSuspectPanel() {
@@ -251,47 +255,53 @@ export class GameManager extends Component {
         });
     }
 
-    private showTutorial() {
+    private showTutorial(showText = false) {
         const tutorialText = this.tutorialText;
         const tutorialRoot = this.tutorialHand;
         const tutorialTarget = this.tutorialHandTarget ?? this.getTutorialPersonCard()?.node ?? null;
         const dropTarget = this.tutorialDropTarget ?? this.witnesses[this.currentWitnessIndex]?.innocentSlots[0] ?? null;
         const tutorialController = tutorialRoot?.getComponent(TutorialController) ?? null;
-        if (!tutorialText || !tutorialRoot || !tutorialController || !tutorialTarget || !dropTarget) {
+        if (!tutorialRoot || !tutorialController || !tutorialTarget || !dropTarget) {
             this.locked = false;
             return;
         }
 
         this.tutorialActive = true;
-        tutorialText.active = true;
         tutorialRoot.active = true;
-        const textOpacity = tutorialText.getComponent(UIOpacity) ?? tutorialText.addComponent(UIOpacity);
-        const textScale = tutorialText.scale.clone();
 
-        textOpacity.opacity = 0;
-        tutorialText.setScale(textScale.x * 0.68, textScale.y * 0.68, textScale.z);
+        if (showText && tutorialText) {
+            tutorialText.active = true;
+            const textOpacity = tutorialText.getComponent(UIOpacity) ?? tutorialText.addComponent(UIOpacity);
+            const textScale = tutorialText.scale.clone();
 
-        tween(textOpacity).to(0.22, { opacity: 255 }, { easing: 'sineOut' }).start();
-        tween(tutorialText)
-            .to(0.28, { scale: new Vec3(textScale.x * 1.12, textScale.y * 1.12, textScale.z) }, { easing: 'backOut' })
-            .to(0.16, { scale: textScale }, { easing: 'sineOut' })
-            .start();
-
-        const pulseScale = new Vec3(textScale.x * 1.03, textScale.y * 1.03, textScale.z);
-        this.scheduleOnce(() => {
+            // show text immediately (no long delays)
+            textOpacity.opacity = 0;
+            tutorialText.setScale(textScale.x * 0.9, textScale.y * 0.9, textScale.z);
+            tween(textOpacity).to(0.22, { opacity: 255 }, { easing: 'sineOut' }).start();
             tween(tutorialText)
-                .repeatForever(
-                    tween()
-                        .to(0.4, { scale: pulseScale }, { easing: 'sineInOut' })
-                        .to(0.4, { scale: textScale }, { easing: 'sineInOut' }),
-                )
+                .to(0.28, { scale: new Vec3(textScale.x * 1.02, textScale.y * 1.02, textScale.z) }, { easing: 'backOut' })
+                .to(0.16, { scale: textScale }, { easing: 'sineOut' })
                 .start();
-        }, 0.44);
 
-        this.scheduleOnce(() => {
-            tutorialController.playTutorial(tutorialTarget, dropTarget);
-            this.locked = false;
-        }, 1.68);
+            const pulseScale = new Vec3(textScale.x * 1.03, textScale.y * 1.03, textScale.z);
+            this.scheduleOnce(() => {
+                tween(tutorialText)
+                    .repeatForever(
+                        tween()
+                            .to(0.4, { scale: pulseScale }, { easing: 'sineInOut' })
+                            .to(0.4, { scale: textScale }, { easing: 'sineInOut' }),
+                    )
+                    .start();
+            }, 0.44);
+        } else if (tutorialText) {
+            // ensure tutorial text remains hidden during idle hint
+            tutorialText.active = false;
+        }
+
+        // start tutorial hand animation immediately
+        tutorialController.playTutorial(tutorialTarget, dropTarget);
+        // unlock quickly so user can interact with hint
+        this.locked = false;
     }
 
     private hideTutorial() {
@@ -321,6 +331,42 @@ export class GameManager extends Component {
         if (this.timerLabel) this.timerLabel.string = `${this.remainingSeconds}s`;
         this.schedule(this.timerTick, 1);
         this.scheduleOnce(this.timerExpired, this.remainingSeconds);
+        // start/reset idle hint timer when gameplay begins
+        this.resetIdleTimer();
+    }
+
+    private resetIdleTimer() {
+        if (this.gameFinished) return;
+        // cancel previous
+        try { this.unschedule(this.idleTimeoutCallback); } catch (e) { /* ignore */ }
+        // schedule hint after idleHintDelay seconds
+        this.scheduleOnce(this.idleTimeoutCallback, this.idleHintDelay);
+    }
+
+    private handleIdleTimeout() {
+        if (this.gameFinished || this.tutorialActive) return;
+        // If player is actively dragging, don't show hint
+        if (this.draggedCard) {
+            this.resetIdleTimer();
+            return;
+        }
+        this.showIdleHint();
+    }
+
+    private showIdleHint() {
+        const witness = this.witnesses[this.currentWitnessIndex];
+        if (!witness) return;
+
+        // find a person card that matches required ids and is not locked in a slot
+        const hintCard = this.personCards.find((card) => card.matches(witness.requiredPersonIds) && card.node.active && !card.isLockedInSlot);
+        // find an empty innocent slot
+        const dropTarget = witness.innocentSlots.find((slot) => !this.slotOccupants.get(slot));
+        if (!hintCard || !dropTarget) return;
+
+        // set tutorial targets and show tutorial hand
+        this.tutorialHandTarget = hintCard.node;
+        this.tutorialDropTarget = dropTarget;
+        this.showTutorial();
     }
 
     private updateTimerLabel() {
@@ -339,6 +385,7 @@ export class GameManager extends Component {
         this.locked = true;
         this.stopGameTimer();
         this.hideTutorial();
+        try { this.unschedule(this.idleTimeoutCallback); } catch (e) { /* ignore */ }
         this.showCTA();
     }
 
@@ -413,6 +460,7 @@ export class GameManager extends Component {
         const location = event.getUILocation();
         this.pressedCard = card;
         this.pressPosition.set(location.x, location.y, 0);
+        this.resetIdleTimer();
     }
 
     private onCardMove(event: EventTouch) {
@@ -426,6 +474,8 @@ export class GameManager extends Component {
             this.startDragging(eventCard);
             this.pressedCard = null;
         }
+        // user moved pointer; reset idle timer so hint won't show
+        if (this.draggedCard) this.resetIdleTimer();
         if (this.draggedCard !== eventCard) return;
         this.draggedCard.node.setWorldPosition(location.x, location.y, this.draggedCard.node.worldPosition.z);
     }
@@ -437,6 +487,7 @@ export class GameManager extends Component {
         if (this.pressedCard === eventCard) this.pressedCard = null;
         if (card !== eventCard) return;
         this.draggedCard = null;
+        this.resetIdleTimer();
         const witness = this.witnesses[this.currentWitnessIndex];
         const slot = this.findSlot(witness, event.getUILocation().x, event.getUILocation().y);
         if (!slot) {
@@ -472,6 +523,7 @@ export class GameManager extends Component {
         card.setIncorrect(false);
         card.node.setParent(this.node, true);
         card.node.setSiblingIndex(this.node.children.length - 1);
+        this.resetIdleTimer();
     }
 
     private findSlot(witness: WitnessCase, screenX: number, screenY: number): Node | null {
@@ -511,6 +563,8 @@ export class GameManager extends Component {
                 this.finishMatchAndShowCTA();
                 return;
             }
+            // Reset idle timer after successful placement
+            this.resetIdleTimer();
             if (this.isWitnessComplete(witness)) this.completeWitness(witness);
             else this.locked = false;
         }).start();
@@ -595,6 +649,7 @@ export class GameManager extends Component {
         this.locked = true;
         this.stopGameTimer();
         this.hideTutorial();
+        try { this.unschedule(this.idleTimeoutCallback); } catch (e) { /* ignore */ }
         console.log('GameManager: finishMatchAndShowCTA - showing CTA');
         this.showCTA();
     }
