@@ -365,11 +365,17 @@ export class GameManager extends Component {
 
         // find a person card that matches required ids and is not locked in a slot
         const hintCard = this.personCards.find((card) => card.matches(witness.requiredPersonIds) && card.node.active && !card.isLockedInSlot);
-        // find an empty innocent slot
-        const dropTarget = witness.innocentSlots.find((slot) => !this.slotOccupants.get(slot));
-        if (!hintCard || !dropTarget) return;
+        if (!hintCard) return;
 
-        // set tutorial targets and show tutorial hand
+        // prefer an occupied wrong slot so the hint shows replacement instead of empty placement
+        const wrongSlot = witness.innocentSlots.find((slot) => {
+            const occupant = this.slotOccupants.get(slot);
+            return occupant && !occupant.matches(witness.requiredPersonIds);
+        });
+
+        const dropTarget = wrongSlot ?? witness.innocentSlots.find((slot) => !this.slotOccupants.get(slot));
+        if (!dropTarget) return;
+
         this.tutorialHandTarget = hintCard.node;
         this.tutorialDropTarget = dropTarget;
         this.showTutorial();
