@@ -35,7 +35,8 @@ export class GameManager extends Component {
     @property public gameDuration = 45;
     @property(Label) public timerLabel: Label | null = null;
     @property(Node) public failScreen: Node | null = null;
-    @property(Node) public killerNode: Node | null = null;
+    // @property(Node) public killerNode: Node | null = null;
+    @property(Node) public ctaNode: Node | null = null;
 
     private readonly cardHomes = new Map<PersonCard, CardHome>();
     private readonly slotOccupants = new Map<Node, PersonCard>();
@@ -53,6 +54,18 @@ export class GameManager extends Component {
     private ctaShown = false;
     private readonly timerTick = () => this.updateTimerLabel();
     private readonly timerExpired = () => this.failLevel();
+
+    private findNodeInSceneByName(name: string): Node | null {
+        const scene = director.getScene();
+        if (!scene) return null;
+        const stack: Node[] = [scene];
+        while (stack.length) {
+            const node = stack.pop()!;
+            if (node.name && node.name.toLowerCase() === name.toLowerCase()) return node;
+            for (const child of node.children) stack.push(child);
+        }
+        return null;
+    }
 
     start() {
         this.locked = true;
@@ -426,7 +439,30 @@ export class GameManager extends Component {
         this.draggedCard = null;
         const witness = this.witnesses[this.currentWitnessIndex];
         const slot = this.findSlot(witness, event.getUILocation().x, event.getUILocation().y);
-        if (!slot) return this.returnCardHome(card);
+        if (!slot) {
+            // If player dropped the suspect onto the win area (winScreen/Guilty), finish the match
+            const x = event.getUILocation().x;
+            const y = event.getUILocation().y;
+            if (card && card.isSuspect && this.winScreen) {
+                const transform = this.winScreen.getComponent(UITransform);
+                if (this.winScreen.activeInHierarchy && transform) {
+                    const pos = this.winScreen.worldPosition;
+                    const withinX = Math.abs(x - pos.x) <= transform.width * Math.abs(this.winScreen.worldScale.x) / 2;
+                    const withinY = Math.abs(y - pos.y) <= transform.height * Math.abs(this.winScreen.worldScale.y) / 2;
+                    if (withinX && withinY) {
+                        // Attach card to winScreen for visual feedback
+                        card.node.setParent(this.winScreen, true);
+                        card.node.setPosition(Vec3.ZERO);
+                        card.hideSourceButton();
+                        this.slotOccupants.set(this.winScreen, card);
+                        card.setLockedInSlot(true);
+                        this.finishMatchAndShowCTA();
+                        return;
+                    }
+                }
+            }
+            return this.returnCardHome(card);
+        }
         this.placeCard(card, slot, witness);
     }
 
@@ -470,6 +506,11 @@ export class GameManager extends Component {
         this.setSlotIncorrect(slot, false);
         card.setLockedInSlot(true);
         tween(card.node).to(0.16, { position: Vec3.ZERO }, { easing: 'quadOut' }).call(() => {
+            // If the placed card is the suspect, finish the level immediately and show CTA
+            if (card.isSuspect) {
+                this.finishMatchAndShowCTA();
+                return;
+            }
             if (this.isWitnessComplete(witness)) this.completeWitness(witness);
             else this.locked = false;
         }).start();
@@ -545,47 +586,127 @@ export class GameManager extends Component {
 
     private winLevel() {
         if (this.locked || this.gameFinished) return;
+        this.finishMatchAndShowCTA();
+    }
+
+    private finishMatchAndShowCTA() {
+        if (this.gameFinished) return;
         this.gameFinished = true;
         this.locked = true;
         this.stopGameTimer();
         this.hideTutorial();
-        this.showKillerThenCTA();
+        console.log('GameManager: finishMatchAndShowCTA - showing CTA');
+        this.showCTA();
     }
 
     private showKillerThenCTA() {
-        const killer = this.killerNode ?? this.node.parent?.getChildByName('Killer') ?? this.winScreen;
-        if (!killer) {
-            this.showCTA();
-            return;
-        }
-        killer.active = true;
-        const finalScale = killer.scale.clone();
-        const opacity = killer.getComponent(UIOpacity) ?? killer.addComponent(UIOpacity);
-        opacity.opacity = 0;
-        killer.setScale(finalScale.x * 0.68, finalScale.y * 0.68, finalScale.z);
-        tween(opacity).to(0.22, { opacity: 255 }, { easing: 'sineOut' }).start();
-        tween(killer)
-            .to(0.38, { scale: new Vec3(finalScale.x * 1.08, finalScale.y * 1.08, finalScale.z) }, { easing: 'backOut' })
-            .to(0.2, { scale: finalScale }, { easing: 'sineOut' })
-            .start();
-        this.scheduleOnce(() => this.showCTA(), 1.2);
+        // Killer reveal removed per design — trigger CTA immediately instead.
+        this.showCTA();
     }
 
     private showCTA() {
         if (this.ctaShown) return;
         this.ctaShown = true;
-        const ctaCanvas = director.getScene()?.getChildByName('CTA') ?? null;
+        console.log('GameManager: showCTA called');
+        const uiCanvas = director.getScene()?.getChildByName('Canvas') ?? this.findNodeInSceneByName('Canvas');
+
+        let ctaCanvas = this.ctaNode
+            ?? director.getScene()?.getChildByName('CTA')
+            ?? this.findNodeInSceneByName('CTA')
+            ?? this.findNodeInSceneByName('cta')
+            ?? null;
+
         if (!ctaCanvas) {
-            if (this.failScreen) this.failScreen.active = true;
-            return;
+            console.log('GameManager: CTA node not found — creating visible runtime CTA.');
+            // create a more visible runtime CTA so the endscreen always appears
+            ctaCanvas = new Node('CTA_runtime');
+            if (uiCanvas) uiCanvas.addChild(ctaCanvas);
+            else director.getScene()?.addChild(ctaCanvas);
+
+            // Ensure the runtime CTA covers the center area and is visible
+            ctaCanvas.setScale(1, 1, 1);
+
+            // Big headline label
+            const headline = new Node('CTA_Headline');
+            headline.setParent(ctaCanvas);
+            const hl = headline.addComponent(Label);
+            hl.string = 'Play Now';
+            try { (hl as any).fontSize = 64; } catch (e) { /* fallback */ }
+            hl.color = new Color(255, 255, 255);
+            headline.setPosition(0, 0, 0);
+
+            // Subtext label
+            const sub = new Node('CTA_Subtext');
+            sub.setParent(ctaCanvas);
+            const sl = sub.addComponent(Label);
+            sl.string = 'Tap to continue';
+            try { (sl as any).fontSize = 32; } catch (e) { /* fallback */ }
+            sl.color = new Color(230, 230, 230);
+            sub.setPosition(0, -72, 0);
+
+            // Make the runtime CTA clickable: tapping will try to call CTAButtonHandler if present
+            ctaCanvas.on(Node.EventType.TOUCH_END, () => {
+                console.log('GameManager: runtime CTA tapped');
+                let handlerComp: Component | null = null;
+
+                // Try common locations first
+                const ctaNode = this.ctaNode ?? this.findNodeInSceneByName('CTA') ?? director.getScene()?.getChildByName('CTA');
+                if (ctaNode) handlerComp = ctaNode.getComponent('CTAButtonHandler') as Component | null;
+
+                // If not found, search the entire scene for a component named 'CTAButtonHandler'
+                if (!handlerComp) {
+                    const scene = director.getScene();
+                    if (scene) {
+                        const stack: Node[] = [scene];
+                        while (stack.length && !handlerComp) {
+                            const node = stack.pop()!;
+                            const comp = node.getComponent('CTAButtonHandler') as Component | null;
+                            if (comp) { handlerComp = comp; break; }
+                            for (const ch of node.children) stack.push(ch);
+                        }
+                    }
+                }
+
+                if (handlerComp && typeof (handlerComp as any).onCTA === 'function') {
+                    try { (handlerComp as any).onCTA(); }
+                    catch (e) { console.warn('GameManager: CTA handler call failed', e); }
+                } else {
+                    console.log('GameManager: CTA handler not found; runtime CTA tapped.');
+                }
+            }, this);
         }
 
+        // Ensure CTA is parented under Canvas (so Widgets/Anchors work)
+        try {
+            if (uiCanvas && ctaCanvas.parent !== uiCanvas) ctaCanvas.setParent(uiCanvas!, true);
+            // Bring CTA to front
+            if (ctaCanvas.parent) ctaCanvas.setSiblingIndex(ctaCanvas.parent.children.length - 1);
+        } catch (e) {
+            console.warn('GameManager: failed to reparent/move CTA', e);
+        }
+
+        console.log('GameManager: showing CTA node', ctaCanvas.name);
+
+        // Ensure visibility: enable node, children, and opacities
         ctaCanvas.active = true;
+        const ownOpacity = ctaCanvas.getComponent(UIOpacity) ?? ctaCanvas.addComponent(UIOpacity);
+        ownOpacity.opacity = 255;
+        for (const child of ctaCanvas.children) {
+            child.active = true;
+            const op = child.getComponent(UIOpacity) ?? child.addComponent(UIOpacity);
+            op.opacity = 255;
+            // ensure reasonable scale/position
+            if (child.scale.x === 0 || child.scale.y === 0) child.setScale(1, 1, 1);
+        }
+
+        // show backdrop and fade-in
         const backdrop = ctaCanvas.getChildByName('SpriteSplash') ?? ctaCanvas;
         backdrop.active = true;
         const backdropOpacity = backdrop.getComponent(UIOpacity) ?? backdrop.addComponent(UIOpacity);
         backdropOpacity.opacity = 0;
         tween(backdropOpacity).to(0.38, { opacity: 255 }, { easing: 'sineOut' }).start();
+
+        // Reveal CTA children safely
         this.revealCTAElement(ctaCanvas.getChildByName('Icon1024'), 0.24, 0.72);
         this.revealCTAElement(ctaCanvas.getChildByName('ProfilePerfect'), 0.56, 0.7);
         this.revealCTAElement(ctaCanvas.getChildByName('play now'), 0.9, 0.78, true);
