@@ -36,6 +36,7 @@ export class GameManager extends Component {
     @property public tutorialDuration = 2.5;
     @property public initialTutorialDelay = 0.3; // earlier show for initial tutorial
     @property public gameDuration = 45;
+    @property({ tooltip: 'Show the end card after this many valid card taps. Set to 0 to disable.' }) public ctaAfterClicks = 4;
     @property(Label) public timerLabel: Label | null = null;
     @property(Node) public failScreen: Node | null = null;
     // @property(Node) public killerNode: Node | null = null;
@@ -64,6 +65,7 @@ export class GameManager extends Component {
     private remainingSeconds = 0;
     private timerStarted = false;
     private ctaShown = false;
+    private gameClickCount = 0;
     private challengeStarted = false;
     private readonly passedThresholds = new Set<analyticsEvents>();
     @property public idleHintDelay = 7; // seconds before showing idle hint after game starts
@@ -89,9 +91,6 @@ export class GameManager extends Component {
         if (this.timerLabel) this.timerLabel.string = `${Math.max(0, Math.ceil(this.gameDuration))}s`;
         this.personCards.forEach((card) => this.registerCard(card));
         this.witnesses.forEach((witness, index) => witness.configure(index === 0, false));
-        this.witnesses.forEach((witness) => {
-            if (witness.witnessRoot) witness.witnessRoot.active = true;
-        });
         this.prepareGameplayPresentation();
         this.showIntro();
     }
@@ -592,6 +591,18 @@ export class GameManager extends Component {
         if (this.locked || this.currentWitnessIndex >= this.witnesses.length) return;
         const card = (event.currentTarget as Node).getComponent(PersonCard);
         if (!card || !card.node.active || card.isLockedInSlot) return;
+
+        this.gameClickCount++;
+        if (this.ctaAfterClicks > 0 && this.gameClickCount >= this.ctaAfterClicks) {
+            this.gameFinished = true;
+            this.locked = true;
+            this.stopGameTimer();
+            this.hideTutorial();
+            try { this.unschedule(this.idleTimeoutCallback); } catch (e) { /* ignore */ }
+            this.showCTA();
+            return;
+        }
+
         this.startGameTimer();
         if (!this.challengeStarted) {
             this.challengeStarted = true;

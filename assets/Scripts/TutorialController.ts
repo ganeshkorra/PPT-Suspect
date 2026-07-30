@@ -134,6 +134,10 @@ export class TutorialController extends Component {
         const endWorld = endNode.worldPosition.clone();
         const ghost = this.ghostNode && this.ghostNode.isValid ? this.ghostNode : null;
 
+        const pressDelay = 0.3;
+        const pressDuration = 0.12;
+        const dragDuration = 0.95;
+
         if (ghost) {
             ghost.active = true;
             ghost.setSiblingIndex((ghost.parent?.children.length ?? 1) - 1);
@@ -157,8 +161,10 @@ export class TutorialController extends Component {
 
         if (ghost) {
             tween(ghost)
-                .delay(0.3)
-                .to(0.95, { worldPosition: endWorld }, { easing: 'sineInOut' })
+                // The card should remain under the hand during the press, then
+                // share the exact same drag interval and easing as the hand.
+                .delay(pressDelay + pressDuration)
+                .to(dragDuration, { worldPosition: endWorld }, { easing: 'sineInOut' })
                 .call(() => {
                     if (ghost && ghost.isValid) ghost.active = false;
                 })
@@ -166,13 +172,13 @@ export class TutorialController extends Component {
         }
 
         this.handTween = tween(handNode)
-            .delay(0.3)
+            .delay(pressDelay)
             .call(() => {
                 handSprite.spriteFrame = this.clickHandSprite!;
                 handNode.setWorldPosition(handGrabPosition);
             })
-            .delay(0.12)
-            .to(0.95, { worldPosition: handDropPosition }, { easing: 'sineInOut' })
+            .delay(pressDuration)
+            .to(dragDuration, { worldPosition: handDropPosition }, { easing: 'sineInOut' })
             .delay(0.06)
             .call(() => {
                 handSprite.spriteFrame = this.idleHandSprite!;
