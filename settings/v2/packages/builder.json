@@ -3,6 +3,9 @@
   "splash-setting": {
     "logo": {
       "type": "none"
+    },
+    "background": {
+      "type": "color"
     }
   }
 }

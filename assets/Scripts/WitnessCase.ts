@@ -10,6 +10,8 @@ export class WitnessCase extends Component {
     @property([PersonCard]) public personCards: PersonCard[] = [];
     @property([Node]) public innocentSlots: Node[] = [];
     @property(Node) public revealButton: Node | null = null;
+    @property(Node) public activeLabel: Node | null = null;
+    @property(Node) public completedLabel: Node | null = null;
     @property([String]) public requiredPersonIds: string[] = [];
     @property public hideCluesUntilReveal = false;
 
@@ -23,6 +25,8 @@ export class WitnessCase extends Component {
 
     public configure(isActive: boolean, showClue = isActive) {
         if (this.witnessRoot) this.witnessRoot.active = isActive;
+        if (this.activeLabel) this.activeLabel.active = isActive;
+        if (this.completedLabel) this.completedLabel.active = false;
         this.clueElements.forEach((element) => element.active = isActive && showClue && !this.hideCluesUntilReveal);
         if (this.revealButton) this.revealButton.active = isActive;
         this.getSlotPanels().forEach((panel) => panel.active = isActive);
@@ -38,8 +42,15 @@ export class WitnessCase extends Component {
         return [...new Set(this.innocentSlots.map((slot) => slot.parent).filter((panel): panel is Node => panel !== null))];
     }
 
+    public showCompletedLabel() {
+        if (this.activeLabel) this.activeLabel.active = false;
+        if (this.completedLabel) this.completedLabel.active = true;
+    }
+
     public complete() {
         if (this.witnessRoot) this.witnessRoot.active = false;
+        if (this.activeLabel) this.activeLabel.active = false;
+        if (this.completedLabel) this.completedLabel.active = false;
         this.clueElements.forEach((element) => element.active = false);
         if (this.revealButton) this.revealButton.active = false;
         this.getSlotPanels().forEach((panel) => panel.active = false);

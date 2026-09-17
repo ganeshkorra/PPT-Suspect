@@ -269,11 +269,13 @@ export class GameManager extends Component {
             // schedule fly sound to match the card animation
             this.scheduleOnce(() => this.playFlySound(), delay);
         });
-        this.witnesses.forEach((witness, index) => {
-            if (witness.witnessRoot) this.playPresentationNode(witness.witnessRoot, 0.82 + index * 0.18, 0.3);
-        });
-        this.getCurrentSlotPanels().forEach((panel, index) => this.playPresentationNode(panel, 1.48 + index * 0.06, 0.34));
-        this.scheduleOnce(() => this.revealCurrentClue(), 1.98);
+
+        // Reference sequence: guest list first, current witness case second,
+        // then reveal the witness/speech bubble before enabling the tutorial.
+        const currentWitness = this.witnesses[this.currentWitnessIndex];
+        if (currentWitness?.witnessRoot) this.playPresentationNode(currentWitness.witnessRoot, 0.72, 0.3);
+        this.getCurrentSlotPanels().forEach((panel, index) => this.playPresentationNode(panel, 0.96 + index * 0.06, 0.34));
+        this.scheduleOnce(() => this.revealCurrentClue(), 1.42);
         Analytics.safeDispatch(analyticsEvents.DISPLAYED);
         this.scheduleOnce(() => this.showTutorial(true), this.initialTutorialDelay);
     }
@@ -540,51 +542,41 @@ export class GameManager extends Component {
 
     private playWitnessExit(witness: WitnessCase, onComplete: () => void) {
         const slotPanels = this.getCurrentSlotPanels();
-        const cardNodes: Node[] = [];
         for (const slot of witness.innocentSlots) {
             const occupant = this.slotOccupants.get(slot);
             if (occupant && occupant.node && (occupant.node as any).isValid) {
                 this.removeCardFromSlot(occupant);
                 occupant.setLockedInSlot(false);
-                cardNodes.push(occupant.node);
             }
         }
 
-        const group = new Node('witness_exit_group');
-        try { group.setParent(this.node, true); } catch (e) { try { director.getScene()?.addChild(group); } catch (e2) { /* ignore */ } }
-        group.setScale(1, 1, 1);
-
-        const members: Node[] = [];
-        if (witness.witnessRoot) members.push(witness.witnessRoot);
-        members.push(...slotPanels);
-        members.push(...cardNodes);
-        members.push(...witness.clueElements);
-
-        const safeMembers = members.filter((n): n is Node => !!n && typeof (n as any).getComponent === 'function');
-        safeMembers.forEach((member) => {
-            try { Tween.stopAllByTarget?.(member); } catch (e) { /* ignore */ }
-            try { member.setParent(group, true); } catch (e) { /* ignore */ }
-            const opacity = member.getComponent(UIOpacity) ?? member.addComponent(UIOpacity);
-            opacity.opacity = 255;
-            tween(opacity).delay(0.16).to(0.85, { opacity: 0 }, { easing: 'sineOut' }).start();
+        // Animate only top-level visual roots. Slots, placed cards and clue labels are
+        // children of these roots, so they move and fade together without reparenting.
+        const visualRoots: Node[] = [];
+        if (witness.witnessRoot) visualRoots.push(witness.witnessRoot);
+        slotPanels.forEach((panel) => {
+            if (!witness.witnessRoot || !panel.isChildOf(witness.witnessRoot)) visualRoots.push(panel);
         });
 
-        const startPos = group.position.clone();
-        const startRot = group.eulerAngles.clone();
-        const peakPos = new Vec3(startPos.x + 65, startPos.y + 150, startPos.z);
-        const endPos = new Vec3(startPos.x + 210, startPos.y + 85, startPos.z);
-
-        tween(group)
-            .to(0, { scale: new Vec3(1.03, 1.03, 1) }, { easing: 'backOut' })
-            //.to(0., { position: peakPos, eulerAngles: new Vec3(startRot.x, startRot.y, startRot.z - 8) }, { easing: 'cubicOut' })
-           // .to(0.55, { position: endPos, scale: new Vec3(0.68, 0.68, 1), eulerAngles: new Vec3(startRot.x, startRot.y, startRot.z - 18) }, { easing: 'cubicInOut' })
-            .start();
+        visualRoots.forEach((root) => {
+            const startPosition = root.position.clone();
+            const startScale = root.scale.clone();
+            try { Tween.stopAllByTarget?.(root); } catch (e) { /* ignore */ }
+            const opacity = root.getComponent(UIOpacity) ?? root.addComponent(UIOpacity);
+            Tween.stopAllByTarget(opacity);
+            opacity.opacity = 255;
+            tween(opacity).to(0.46, { opacity: 0 }, { easing: 'sineInOut' }).start();
+            tween(root)
+                .to(0.46, {
+                    position: new Vec3(startPosition.x - 34, startPosition.y + 18, startPosition.z),
+                    scale: new Vec3(startScale.x * 0.94, startScale.y * 0.94, startScale.z),
+                }, { easing: 'quadInOut' })
+                .start();
+        });
 
         this.scheduleOnce(() => {
-            try { safeMembers.forEach((m) => { if ((m as any).isValid) m.active = false; }); } catch (e) { /* ignore */ }
-            try { group.removeFromParent(); } catch (e) { /* ignore */ }
             onComplete();
-        }, 0.2);
+        }, 0.48);
     }
 
     private beginDrag(event: EventTouch) {
@@ -646,27 +638,6 @@ export class GameManager extends Component {
         const witness = this.witnesses[this.currentWitnessIndex];
         const slot = this.findSlot(witness, event.getUILocation().x, event.getUILocation().y);
         if (!slot) {
-            // If player dropped the suspect onto the win area (winScreen/Guilty), finish the match
-            const x = event.getUILocation().x;
-            const y = event.getUILocation().y;
-            if (card && card.isSuspect && this.winScreen) {
-                const transform = this.winScreen.getComponent(UITransform);
-                if (this.winScreen.activeInHierarchy && transform) {
-                    const pos = this.winScreen.worldPosition;
-                    const withinX = Math.abs(x - pos.x) <= transform.width * Math.abs(this.winScreen.worldScale.x) / 2;
-                    const withinY = Math.abs(y - pos.y) <= transform.height * Math.abs(this.winScreen.worldScale.y) / 2;
-                    if (withinX && withinY) {
-                        // Attach card to winScreen for visual feedback
-                        card.node.setParent(this.winScreen, true);
-                        card.node.setPosition(Vec3.ZERO);
-                        card.hideSourceButton();
-                        this.slotOccupants.set(this.winScreen, card);
-                        card.setLockedInSlot(true);
-                        this.finishMatchAndShowCTA();
-                        return;
-                    }
-                }
-            }
             return this.returnCardHome(card);
         }
         this.placeCard(card, slot, witness);
@@ -717,11 +688,6 @@ export class GameManager extends Component {
         this.setSlotIncorrect(slot, false);
         card.setLockedInSlot(true);
         tween(card.node).to(0.16, { position: Vec3.ZERO }, { easing: 'quadOut' }).call(() => {
-            // If the placed card is the suspect, finish the level immediately and show CTA
-            if (card.isSuspect) {
-                this.finishMatchAndShowCTA();
-                return;
-            }
             // Reset idle timer after successful placement
             this.resetIdleTimer();
             if (this.isWitnessComplete(witness)) this.completeWitness(witness);
@@ -771,21 +737,26 @@ export class GameManager extends Component {
         console.log('completeWitness called for witness', witness?.name ?? this.currentWitnessIndex);
         // audio: play match sound when witness case completes
         this.playMatchSound();
+        witness.showCompletedLabel();
 
-        this.playWitnessExit(witness, () => {
+        const exitWitness = () => this.playWitnessExit(witness, () => {
             witness.complete();
             this.currentWitnessIndex++;
             this.dispatchChallengePassEvents();
             const nextWitness = this.witnesses[this.currentWitnessIndex];
             if (nextWitness) {
                 nextWitness.configure(true, false);
-                if (nextWitness.witnessRoot) this.prepareBurstNode(nextWitness.witnessRoot, -90, 145, 0.66, 12);
-                this.getCurrentSlotPanels().forEach((panel) => this.prepareBurstNode(panel, 70, 145, 0.76, -14));
-                this.playWitnessReveal(nextWitness, 0.08, true);
+                if (nextWitness.witnessRoot) this.prepareBurstNode(nextWitness.witnessRoot, 28, 24, 0.94, 2);
+                this.getCurrentSlotPanels().forEach((panel) => this.prepareBurstNode(panel, 18, 20, 0.96, -2));
+                this.playWitnessReveal(nextWitness, 0.06, false);
                 return;
             }
-            this.showSuspect();
+            this.finishMatchAndShowCTA();
         });
+
+        // Let the completed message remain readable before using the usual exit flow.
+        if (witness.completedLabel) this.scheduleOnce(exitWitness, 1.321);
+        else exitWitness();
     }
 
     private dispatchChallengePassEvents() {
@@ -806,26 +777,6 @@ export class GameManager extends Component {
                 Analytics.safeDispatch(threshold.event);
             }
         }
-    }
-
-    private showSuspect() {
-        const suspect = this.personCards.find((card) => card.isSuspect);
-        this.personCards.forEach((card) => {
-            if (card !== suspect && card.node.active) card.node.active = false;
-        });
-        if (!suspect) return;
-
-        if (!this.passedThresholds.has(analyticsEvents.CHALLENGE_PASS_75)) {
-            this.passedThresholds.add(analyticsEvents.CHALLENGE_PASS_75);
-            Analytics.safeDispatch(analyticsEvents.CHALLENGE_PASS_75);
-        }
-
-        this.locked = false;
-        suspect.node.setParent(this.node, true);
-        suspect.node.setSiblingIndex(this.node.children.length - 1);
-        tween(suspect.node).repeatForever(tween().to(0.35, { scale: new Vec3(1.12, 1.12, 1) }).to(0.35, { scale: Vec3.ONE })).start();
-        suspect.node.off(Node.EventType.TOUCH_START, this.beginDrag, this);
-        suspect.node.on(Node.EventType.TOUCH_END, this.winLevel, this);
     }
 
     private createConfettiBlast(origin?: Vec3 | Node, count = 24) {
@@ -874,11 +825,6 @@ export class GameManager extends Component {
 
             tween(opacity).delay(0.6).to(0.8, { opacity: 0 }, { easing: 'sineIn' }).start();
         }
-    }
-
-    private winLevel() {
-        if (this.locked || this.gameFinished) return;
-        this.finishMatchAndShowCTA();
     }
 
     private finishMatchAndShowCTA() {
