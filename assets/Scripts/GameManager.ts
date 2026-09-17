@@ -1,4 +1,4 @@
-import { _decorator, AudioClip, AudioSource, Color, Component, director, EventTouch, Label, Node, Sprite, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, AudioClip, AudioSource, Color, Component, director, EventTouch, Label, Node, Sprite, SpriteFrame, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Graphics } from 'cc';
 import { Analytics, analyticsEvents } from './Analytics';
 import { PersonCard } from './PersonCard';
@@ -28,6 +28,8 @@ export class GameManager extends Component {
     @property(Node) public introCanvas: Node | null = null;
     @property(Node) public introContent: Node | null = null;
     @property(Node) public introText: Node | null = null;
+    @property(Sprite) public gameplayBackground: Sprite | null = null;
+    @property(SpriteFrame) public blurredBackgroundFrame: SpriteFrame | null = null;
     @property public introDuration = 3;
     @property(Node) public tutorialText: Node | null = null;
     @property(Node) public tutorialHand: Node | null = null;
@@ -43,6 +45,7 @@ export class GameManager extends Component {
     @property(Node) public ctaNode: Node | null = null;
     @property(AudioSource) public bgmSource: AudioSource | null = null;
     @property(AudioSource) public sfxSource: AudioSource | null = null;
+    @property(AudioSource) public voiceSource: AudioSource | null = null;
     @property(AudioClip) public bgmClip: AudioClip | null = null;
     @property(AudioClip) public holdClip: AudioClip | null = null;
     @property(AudioClip) public dropClip: AudioClip | null = null;
@@ -72,6 +75,8 @@ export class GameManager extends Component {
     private readonly idleTimeoutCallback = () => this.handleIdleTimeout();
     private readonly timerTick = () => this.updateTimerLabel();
     private readonly timerExpired = () => this.failLevel();
+    private audioUnlocked = false;
+    private pendingWitnessVoice: AudioClip | null = null;
 
     private findNodeInSceneByName(name: string): Node | null {
         const scene = director.getScene();
@@ -101,6 +106,47 @@ export class GameManager extends Component {
         if (!src) src = this.node.addComponent(AudioSource);
         this.sfxSource = src;
         return src;
+    }
+
+    private ensureVoiceSource(): AudioSource | null {
+        if (this.voiceSource && this.voiceSource.isValid) return this.voiceSource;
+        try {
+            this.voiceSource = this.node.addComponent(AudioSource);
+            this.voiceSource.loop = false;
+            this.voiceSource.playOnAwake = false;
+        } catch (e) {
+            this.voiceSource = null;
+        }
+        return this.voiceSource;
+    }
+
+    private playWitnessVoice(clip: AudioClip | null) {
+        if (!clip) return;
+        const source = this.ensureVoiceSource();
+        if (!source) {
+            this.pendingWitnessVoice = clip;
+            return;
+        }
+
+        // Try immediately when the clue appears. Keep the clip queued until the
+        // first gesture so restricted ad webviews can retry if autoplay is blocked.
+        this.pendingWitnessVoice = this.audioUnlocked ? null : clip;
+        source.stop();
+        source.clip = clip;
+        source.loop = false;
+        source.volume = 1;
+        source.play();
+    }
+
+    private unlockWitnessVoice() {
+        const pendingVoice = this.pendingWitnessVoice;
+        this.audioUnlocked = true;
+        if (!pendingVoice) return;
+        if (this.voiceSource?.playing) {
+            this.pendingWitnessVoice = null;
+            return;
+        }
+        this.playWitnessVoice(pendingVoice);
     }
 
     private ensureBgmSource(): AudioSource | null {
@@ -199,6 +245,7 @@ export class GameManager extends Component {
     private showIntro() {
         const introCanvas = this.introCanvas;
         if (!introCanvas) {
+            this.applyBlurredGameplayBackground();
             this.playGameplayPresentation();
             return;
         }
@@ -243,10 +290,17 @@ export class GameManager extends Component {
             }
         }, Math.max(0.2, this.introDuration - 0.42));
         this.scheduleOnce(() => {
+            this.applyBlurredGameplayBackground();
             introCanvas.active = false;
             Analytics.safeDispatch(analyticsEvents.LOADED);
             this.playGameplayPresentation();
         }, this.introDuration);
+    }
+
+    private applyBlurredGameplayBackground() {
+        if (this.gameplayBackground && this.blurredBackgroundFrame) {
+            this.gameplayBackground.spriteFrame = this.blurredBackgroundFrame;
+        }
     }
 
     private prepareGameplayPresentation() {
@@ -323,6 +377,7 @@ export class GameManager extends Component {
     private revealCurrentClue(dramatic = false) {
         const witness = this.witnesses[this.currentWitnessIndex];
         if (!witness) return;
+        this.playWitnessVoice(witness.clueVoice);
         witness.clueElements.forEach((clue) => {
             clue.active = true;
             const finalScale = clue.scale.clone();
@@ -541,6 +596,7 @@ export class GameManager extends Component {
     }
 
     private playWitnessExit(witness: WitnessCase, onComplete: () => void) {
+        this.voiceSource?.stop();
         const slotPanels = this.getCurrentSlotPanels();
         for (const slot of witness.innocentSlots) {
             const occupant = this.slotOccupants.get(slot);
@@ -552,16 +608,12 @@ export class GameManager extends Component {
 
         // Animate only top-level visual roots. Slots, placed cards and clue labels are
         // children of these roots, so they move and fade together without reparenting.
-        const visualRoots: Node[] = [];
-        if (witness.witnessRoot) visualRoots.push(witness.witnessRoot);
-        slotPanels.forEach((panel) => {
-            if (!witness.witnessRoot || !panel.isChildOf(witness.witnessRoot)) visualRoots.push(panel);
-        });
+        const visualRoots: Node[] = witness.witnessRoot ? [witness.witnessRoot] : slotPanels;
 
         visualRoots.forEach((root) => {
             const startPosition = root.position.clone();
             const startScale = root.scale.clone();
-            try { Tween.stopAllByTarget?.(root); } catch (e) { /* ignore */ }
+            Tween.stopAllByTarget(root);
             const opacity = root.getComponent(UIOpacity) ?? root.addComponent(UIOpacity);
             Tween.stopAllByTarget(opacity);
             opacity.opacity = 255;
@@ -583,6 +635,7 @@ export class GameManager extends Component {
         if (this.locked || this.currentWitnessIndex >= this.witnesses.length) return;
         const card = (event.currentTarget as Node).getComponent(PersonCard);
         if (!card || !card.node.active || card.isLockedInSlot) return;
+        this.unlockWitnessVoice();
 
         this.gameClickCount++;
         if (this.ctaAfterClicks > 0 && this.gameClickCount >= this.ctaAfterClicks) {
@@ -735,9 +788,11 @@ export class GameManager extends Component {
 
     private completeWitness(witness: WitnessCase) {
         console.log('completeWitness called for witness', witness?.name ?? this.currentWitnessIndex);
+        this.hideTutorial();
         // audio: play match sound when witness case completes
         this.playMatchSound();
         witness.showCompletedLabel();
+        this.playWitnessVoice(witness.completedClueVoice);
 
         const exitWitness = () => this.playWitnessExit(witness, () => {
             witness.complete();
@@ -859,6 +914,7 @@ export class GameManager extends Component {
         if (this.ctaShown) return;
         // stop BGM when showing CTA
         try { if (this.bgmSource && this.bgmSource.isValid) this.bgmSource.stop(); } catch (e) { /* ignore */ }
+        try { if (this.voiceSource && this.voiceSource.isValid) this.voiceSource.stop(); } catch (e) { /* ignore */ }
         // also try to stop common audio sources (camera nodes)
         try {
             const mainAudio = director.getScene()?.getChildByName('Canvas-001')?.getChildByName('GameCamera')?.getComponent(AudioSource)

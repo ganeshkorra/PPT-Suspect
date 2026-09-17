@@ -1,4 +1,4 @@
-import { _decorator, Component, Node } from 'cc';
+import { _decorator, AudioClip, Component, Node } from 'cc';
 import { PersonCard } from './PersonCard';
 
 const { ccclass, property } = _decorator;
@@ -12,6 +12,8 @@ export class WitnessCase extends Component {
     @property(Node) public revealButton: Node | null = null;
     @property(Node) public activeLabel: Node | null = null;
     @property(Node) public completedLabel: Node | null = null;
+    @property(AudioClip) public clueVoice: AudioClip | null = null;
+    @property(AudioClip) public completedClueVoice: AudioClip | null = null;
     @property([String]) public requiredPersonIds: string[] = [];
     @property public hideCluesUntilReveal = false;
 
