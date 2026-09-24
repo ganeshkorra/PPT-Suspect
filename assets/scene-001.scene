@@ -1597,7 +1597,7 @@
     "activeLabel": null,
     "completedLabel": null,
     "clueVoice": {
-      "__uuid__": "bfada5a1-42de-4c7e-908c-425cdd42e039",
+      "__uuid__": "b3f03696-15dc-4054-8e5e-f6a180894147",
       "__expectedType__": "cc.AudioClip"
     },
     "completedClueVoice": null,
@@ -6933,7 +6933,7 @@
     "activeLabel": null,
     "completedLabel": null,
     "clueVoice": {
-      "__uuid__": "adc7df0a-b4d8-47ab-a404-daa6f3c89892",
+      "__uuid__": "54f18264-c73d-4498-a76a-c79a989735d7",
       "__expectedType__": "cc.AudioClip"
     },
     "completedClueVoice": null,
@@ -6959,7 +6959,7 @@
         "__id__": 192
       }
     ],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 210
@@ -7055,7 +7055,7 @@
   },
   {
     "__type__": "cc.Node",
-    "_name": "Label-002",
+    "_name": "Label-003",
     "_objFlags": 0,
     "__editorExtras__": {},
     "_parent": {
@@ -7075,7 +7075,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 0,
-      "y": 12.271,
+      "y": 13.589077734787281,
       "z": 0
     },
     "_lrot": {
@@ -7087,9 +7087,9 @@
     },
     "_lscale": {
       "__type__": "cc.Vec3",
-      "x": 0.5834568316960421,
-      "y": 0.5834568316960421,
-      "z": 0.5834568316960421
+      "x": 0.583456831696042,
+      "y": 0.583456831696042,
+      "z": 0.583456831696042
     },
     "_mobility": 0,
     "_layer": 33554432,
@@ -7099,7 +7099,7 @@
       "y": 0,
       "z": 0
     },
-    "_id": "77vtQ/icZCgL6Tc2/YykZ2"
+    "_id": "97UeqqXeBHBoBs4iMvs5zE"
   },
   {
     "__type__": "cc.UITransform",
@@ -7114,14 +7114,14 @@
     "_contentSize": {
       "__type__": "cc.Size",
       "width": 286.38531494140625,
-      "height": 58.759999999999984
+      "height": 51.07600000000001
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
       "x": 0.5,
       "y": 0.5
     },
-    "_id": "32+pVT/+1O4oBQ/vZVO1Rr"
+    "_id": "b7PQnMTTBIh7qCL62y1Zbj"
   },
   {
     "__type__": "cc.Label",
@@ -7145,11 +7145,11 @@
     },
     "_string": "❤️ Wife only likes bald \nguys",
     "_horizontalAlign": 1,
-    "_verticalAlign": 1,
+    "_verticalAlign": 0,
     "_actualFontSize": 26.7,
     "_fontSize": 26.7,
     "_fontFamily": "Arial",
-    "_lineHeight": 26,
+    "_lineHeight": 22.6,
     "_overflow": 0,
     "_enableWrapText": true,
     "_font": {
@@ -7186,7 +7186,7 @@
       "y": 2
     },
     "_shadowBlur": 2,
-    "_id": "eb5a97GsZEAbCSUruvPp6L"
+    "_id": "52pnfFx7RGtaQCO6D5I6Pd"
   },
   {
     "__type__": "cc.UITransform",
@@ -8056,7 +8056,7 @@
     "activeLabel": null,
     "completedLabel": null,
     "clueVoice": {
-      "__uuid__": "6f061e19-84cb-4f3d-a995-0fe3e3324195",
+      "__uuid__": "06013ecb-dd8a-48bc-9500-f41c97a30ca7",
       "__expectedType__": "cc.AudioClip"
     },
     "completedClueVoice": null,
@@ -8268,7 +8268,7 @@
     },
     "_string": "🚫 Blondes are banned",
     "_horizontalAlign": 1,
-    "_verticalAlign": 1,
+    "_verticalAlign": 0,
     "_actualFontSize": 26.7,
     "_fontSize": 26.7,
     "_fontFamily": "Arial",
@@ -9181,13 +9181,10 @@
     },
     "completedLabel": null,
     "clueVoice": {
-      "__uuid__": "d57e2698-e37b-49d8-a9c8-e5069165361e",
+      "__uuid__": "5e0adbad-7a4e-4336-9f21-7466549945d2",
       "__expectedType__": "cc.AudioClip"
     },
-    "completedClueVoice": {
-      "__uuid__": "827d3064-e90b-4dd6-810b-6a11f860d6f2",
-      "__expectedType__": "cc.AudioClip"
-    },
+    "completedClueVoice": null,
     "requiredPersonIds": [
       "Blonde"
     ],
