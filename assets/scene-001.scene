@@ -9782,9 +9782,7 @@
     "winScreen": null,
     "introCanvas": null,
     "introContent": null,
-    "introText": {
-      "__id__": 7
-    },
+    "introText": null,
     "gameplayBackground": {
       "__id__": 11
     },
@@ -9792,13 +9790,17 @@
       "__uuid__": "f1c712f6-a641-4450-9dff-4326e481f97b@f9941",
       "__expectedType__": "cc.SpriteFrame"
     },
+    "cursorIdleFrame": {
+      "__uuid__": "b7af3458-6b78-4c44-9d8c-74581243a441@f9941",
+      "__expectedType__": "cc.SpriteFrame"
+    },
+    "cursorClickFrame": {
+      "__uuid__": "b4e1ac65-641f-42e6-8a00-be0b63b55807@f9941",
+      "__expectedType__": "cc.SpriteFrame"
+    },
     "introDuration": 3,
-    "tutorialText": {
-      "__id__": 239
-    },
-    "tutorialHand": {
-      "__id__": 242
-    },
+    "tutorialText": null,
+    "tutorialHand": null,
     "tutorialHandTarget": {
       "__id__": 46
     },

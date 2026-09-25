@@ -1,4 +1,4 @@
-import { _decorator, AudioClip, AudioSource, Color, Component, director, EventTouch, Label, Node, Sprite, SpriteFrame, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { _decorator, AudioClip, AudioSource, Color, Component, director, EventMouse, EventTouch, input, Input, Label, Node, Sprite, SpriteFrame, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { Graphics } from 'cc';
 import { Analytics, analyticsEvents } from './Analytics';
 import { PersonCard } from './PersonCard';
@@ -30,6 +30,8 @@ export class GameManager extends Component {
     @property(Node) public introText: Node | null = null;
     @property(Sprite) public gameplayBackground: Sprite | null = null;
     @property(SpriteFrame) public blurredBackgroundFrame: SpriteFrame | null = null;
+    @property(SpriteFrame) public cursorIdleFrame: SpriteFrame | null = null;
+    @property(SpriteFrame) public cursorClickFrame: SpriteFrame | null = null;
     @property public introDuration = 3;
     @property(Node) public tutorialText: Node | null = null;
     @property(Node) public tutorialHand: Node | null = null;
@@ -77,6 +79,16 @@ export class GameManager extends Component {
     private readonly timerExpired = () => this.failLevel();
     private audioUnlocked = false;
     private pendingWitnessVoice: AudioClip | null = null;
+    private cursorElement: HTMLElement | null = null;
+    private previousCursor = '';
+    private customCursorNode: Node | null = null;
+    private readonly cursorMoveHandler = (event: EventMouse) => this.moveCustomCursor(event);
+    private readonly cursorDownHandler = () => this.setCustomCursorPressed(true);
+    private readonly cursorUpHandler = () => this.setCustomCursorPressed(false);
+    private readonly cursorLeaveHandler = () => {
+        this.setCustomCursorPressed(false);
+        if (this.customCursorNode) this.customCursorNode.active = false;
+    };
 
     private findNodeInSceneByName(name: string): Node | null {
         const scene = director.getScene();
@@ -91,6 +103,7 @@ export class GameManager extends Component {
     }
 
     start() {
+        this.enableCustomCursor();
         Analytics.safeDispatch(analyticsEvents.LOADING);
         this.locked = true;
         if (this.timerLabel) this.timerLabel.string = `${Math.max(0, Math.ceil(this.gameDuration))}s`;
@@ -217,6 +230,7 @@ export class GameManager extends Component {
     }
 
     onDestroy() {
+        this.disableCustomCursor();
         this.personCards.forEach((card) => {
             card.node.off(Node.EventType.TOUCH_START, this.beginDrag, this);
             card.node.off(Node.EventType.TOUCH_MOVE, this.onCardMove, this);
@@ -226,6 +240,68 @@ export class GameManager extends Component {
         this.unschedule(this.timerTick);
         this.unschedule(this.timerExpired);
         try { this.unschedule(this.idleTimeoutCallback); } catch (e) { /* ignore */ }
+    }
+
+    private enableCustomCursor() {
+        if (!this.cursorIdleFrame || !this.cursorClickFrame || typeof document === 'undefined') return;
+        if (typeof window !== 'undefined' && window.matchMedia && !window.matchMedia('(pointer: fine)').matches) return;
+
+        const canvas = document.querySelector('canvas') as HTMLElement | null;
+        const cursorElement = canvas ?? document.body;
+        if (!cursorElement) return;
+        this.cursorElement = cursorElement;
+        this.previousCursor = cursorElement.style.cursor;
+        cursorElement.style.cursor = 'none';
+        cursorElement.addEventListener('mouseleave', this.cursorLeaveHandler);
+
+        const cursorNode = new Node('CustomCursor');
+        const cursorParent = this.node.parent ?? this.node;
+        cursorParent.addChild(cursorNode);
+        cursorNode.layer = cursorParent.layer;
+        cursorNode.active = false;
+        cursorNode.setScale(0.2, 0.2, 1);
+
+        const transform = cursorNode.addComponent(UITransform);
+        transform.setContentSize(503, 625);
+        transform.setAnchorPoint(0, 1.2);
+        const sprite = cursorNode.addComponent(Sprite);
+        sprite.spriteFrame = this.cursorIdleFrame;
+        sprite.sizeMode = Sprite.SizeMode.RAW;
+        this.customCursorNode = cursorNode;
+
+        input.on(Input.EventType.MOUSE_MOVE, this.cursorMoveHandler, this);
+        input.on(Input.EventType.MOUSE_DOWN, this.cursorDownHandler, this);
+        input.on(Input.EventType.MOUSE_UP, this.cursorUpHandler, this);
+    }
+
+    private moveCustomCursor(event: EventMouse) {
+        const cursorNode = this.customCursorNode;
+        if (!cursorNode?.isValid) return;
+        const location = event.getUILocation();
+        cursorNode.active = true;
+        cursorNode.setWorldPosition(location.x, location.y, cursorNode.worldPosition.z);
+        cursorNode.setSiblingIndex((cursorNode.parent?.children.length ?? 1) - 1);
+    }
+
+    private setCustomCursorPressed(isPressed: boolean) {
+        const cursorNode = this.customCursorNode;
+        const sprite = cursorNode?.getComponent(Sprite);
+        if (!cursorNode?.isValid || !sprite) return;
+        sprite.spriteFrame = isPressed ? this.cursorClickFrame : this.cursorIdleFrame;
+        cursorNode.setScale(isPressed ? 0.2 : 0.2, isPressed ? 0.2 : 0.2, 1);
+    }
+
+    private disableCustomCursor() {
+        input.off(Input.EventType.MOUSE_MOVE, this.cursorMoveHandler, this);
+        input.off(Input.EventType.MOUSE_DOWN, this.cursorDownHandler, this);
+        input.off(Input.EventType.MOUSE_UP, this.cursorUpHandler, this);
+        if (this.cursorElement) {
+            this.cursorElement.removeEventListener('mouseleave', this.cursorLeaveHandler);
+            this.cursorElement.style.cursor = this.previousCursor;
+            this.cursorElement = null;
+        }
+        if (this.customCursorNode?.isValid) this.customCursorNode.destroy();
+        this.customCursorNode = null;
     }
 
     private registerCard(card: PersonCard) {
