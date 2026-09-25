@@ -730,10 +730,7 @@ export class GameManager extends Component {
         if (isSwap) this.playSwapSound();
 
         if (!card.matches(witness.requiredPersonIds)) {
-            card.setLockedInSlot(false);
-            card.setIncorrect(false);
-            this.setSlotIncorrect(slot, true);
-            tween(card.node).to(0.16, { position: Vec3.ZERO }, { easing: 'quadOut' }).call(() => this.locked = false).start();
+            this.rejectCard(card);
             return;
         }
 
@@ -748,19 +745,42 @@ export class GameManager extends Component {
         }).start();
     }
 
-    private returnCardHome(card: PersonCard, animate = false) {
+    private rejectCard(card: PersonCard) {
+        card.setLockedInSlot(false);
+        tween(card.node)
+            .to(0.1, { position: Vec3.ZERO }, { easing: 'quadOut' })
+            .to(0.055, { position: new Vec3(-12, 0, 0) }, { easing: 'sineInOut' })
+            .to(0.055, { position: new Vec3(12, 0, 0) }, { easing: 'sineInOut' })
+            .to(0.05, { position: new Vec3(-7, 0, 0) }, { easing: 'sineInOut' })
+            .to(0.05, { position: new Vec3(7, 0, 0) }, { easing: 'sineInOut' })
+            .to(0.04, { position: Vec3.ZERO }, { easing: 'sineOut' })
+            .call(() => {
+                this.removeCardFromSlot(card);
+                this.returnCardHome(card, true, () => this.locked = false);
+            })
+            .start();
+    }
+
+    private returnCardHome(card: PersonCard, animate = false, onComplete?: () => void) {
         const home = this.cardHomes.get(card);
-        if (!home) return;
+        if (!home) {
+            onComplete?.();
+            return;
+        }
         card.setLockedInSlot(false);
         card.setIncorrect(false);
         card.showSourceButton();
         card.node.setParent(home.parent, true);
         card.node.setSiblingIndex(home.siblingIndex);
         if (animate) {
-            tween(card.node).to(0.18, { position: home.position, scale: home.scale }, { easing: 'quadOut' }).start();
+            tween(card.node)
+                .to(0.24, { position: home.position, scale: home.scale }, { easing: 'cubicOut' })
+                .call(() => onComplete?.())
+                .start();
         } else {
             card.node.setPosition(home.position);
             card.node.setScale(home.scale);
+            onComplete?.();
         }
     }
 
