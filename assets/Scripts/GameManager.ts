@@ -665,16 +665,18 @@ export class GameManager extends Component {
     private playWitnessExit(witness: WitnessCase, nextWitness: WitnessCase | undefined, onComplete: () => void) {
         this.voiceSource?.stop();
 
-        if (this.witnesses.length > 0) {
-            this.witnesses.forEach((entry) => {
-                if (!entry || entry === witness || entry === nextWitness) return;
+        if (Array.isArray(this.witnesses)) {
+            for (let i = 0; i < this.witnesses.length; i++) {
+                const entry = this.witnesses[i];
+                if (!entry || entry === witness || entry === nextWitness) continue;
                 this.safeWitnessCall(entry, 'complete');
                 this.safeWitnessCall(entry, 'configure', false, false);
-            });
+            }
         }
 
         const slotPanels = this.getSlotPanels(witness);
-        for (const slot of witness.innocentSlots) {
+        for (let i = 0; i < witness.innocentSlots.length; i++) {
+            const slot = witness.innocentSlots[i];
             const occupant = this.slotOccupants.get(slot);
             if (occupant && occupant.node && (occupant.node as any).isValid) {
                 this.removeCardFromSlot(occupant);
@@ -684,41 +686,46 @@ export class GameManager extends Component {
 
         // The police character stays fixed. Clues animate away, while the red slot
         // panel only fades and never changes its authored position, scale or rotation.
-        witness.clueElements.forEach((clue) => {
-            const startScale = clue.scale.clone();
-            Tween.stopAllByTarget(clue);
+        for (let i = 0; i < witness.clueElements.length; i++) {
+            const clue = witness.clueElements[i];
+            if (!clue || !(clue as any).isValid) continue;
             const opacity = clue.getComponent(UIOpacity) ?? clue.addComponent(UIOpacity);
             Tween.stopAllByTarget(opacity);
             opacity.opacity = 255;
-            tween(opacity).to(0.32, { opacity: 0 }, { easing: 'sineInOut' }).start();
-            tween(clue)
-                .to(0.34, {
-                    position: new Vec3(clue.position.x - 70, clue.position.y + 8, clue.position.z),
-                    scale: new Vec3(startScale.x * 0.9, startScale.y * 0.9, startScale.z),
-                }, { easing: 'quadIn' })
+            tween(opacity)
+                .to(0.32, { opacity: 0 }, { easing: 'sineInOut' })
+                .call(() => {
+                    if (clue.isValid) clue.active = false;
+                })
                 .start();
-        });
+        }
 
         const dissolveDuration = 0.42;
-        slotPanels.forEach((panel) => {
+        for (let i = 0; i < slotPanels.length; i++) {
+            const panel = slotPanels[i];
+            if (!panel || !(panel as any).isValid) continue;
             const opacity = panel.getComponent(UIOpacity) ?? panel.addComponent(UIOpacity);
             Tween.stopAllByTarget(opacity);
             opacity.opacity = 255;
             tween(opacity).to(dissolveDuration, { opacity: 0 }, { easing: 'sineInOut' }).start();
-        });
+        }
 
         // Cross-dissolve directly into the next slot panel so the red card never
         // disappears into an empty gap. The duplicated police sprite is unchanged.
         if (nextWitness) {
-            nextWitness.configure(true, false);
+            this.safeWitnessCall(nextWitness, 'configure', true, false);
             const nextPanels = this.getSlotPanels(nextWitness);
-            nextPanels.forEach((panel) => {
-                this.prepareFadeNode(panel);
-            });
+            for (let i = 0; i < nextPanels.length; i++) {
+                const panel = nextPanels[i];
+                if (panel && (panel as any).isValid) this.prepareFadeNode(panel);
+            }
             // Give constrained ad webviews a real frame at zero opacity before
             // tweening. A zero-second schedule can still execute in the same frame.
             this.scheduleOnce(() => {
-                nextPanels.forEach((panel) => this.playFadeNode(panel, 0, dissolveDuration));
+                for (let i = 0; i < nextPanels.length; i++) {
+                    const panel = nextPanels[i];
+                    if (panel && (panel as any).isValid) this.playFadeNode(panel, 0, dissolveDuration);
+                }
             }, 0.034);
         }
 
@@ -909,26 +916,30 @@ export class GameManager extends Component {
         }
 
         this.witnessTransitioning = true;
+        this.locked = true;
         console.log('completeWitness called for witness', witness?.name ?? this.currentWitnessIndex);
         this.hideTutorial();
         // audio: play match sound when witness case completes
         this.playMatchSound();
-        witness.showCompletedLabel();
+        this.safeWitnessCall(witness, 'showCompletedLabel');
         this.playWitnessVoice(witness.completedClueVoice);
 
         const nextWitness = this.witnesses[witnessIndex + 1];
         const exitWitness = () => this.playWitnessExit(witness, nextWitness, () => {
-            witness.complete();
+            this.safeWitnessCall(witness, 'complete');
             this.currentWitnessIndex = witnessIndex + 1;
             this.dispatchChallengePassEvents();
             this.witnessTransitioning = false;
 
             if (nextWitness) {
-                this.witnesses.forEach((entry) => {
-                    if (!entry || entry === nextWitness) return;
-                    this.safeWitnessCall(entry, 'complete');
-                    this.safeWitnessCall(entry, 'configure', false, false);
-                });
+                if (Array.isArray(this.witnesses)) {
+                    for (let i = 0; i < this.witnesses.length; i++) {
+                        const entry = this.witnesses[i];
+                        if (!entry || entry === nextWitness) continue;
+                        this.safeWitnessCall(entry, 'complete');
+                        this.safeWitnessCall(entry, 'configure', false, false);
+                    }
+                }
                 this.safeWitnessCall(nextWitness, 'configure', true, false);
                 // Later witnesses use a clear clue-only entrance. The witness root
                 // itself is never moved, so the police character remains stationary.
