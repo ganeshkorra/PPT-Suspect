@@ -32,7 +32,9 @@ export class WitnessCase extends Component {
         this.clueElements.forEach((element) => element.active = isActive && showClue && !this.hideCluesUntilReveal);
         if (this.revealButton) this.revealButton.active = isActive;
         this.getSlotPanels().forEach((panel) => panel.active = isActive);
-        if (isActive) this.innocentSlots.forEach((slot) => slot.active = true);
+        this.innocentSlots.forEach((slot) => {
+            slot.active = isActive;
+        });
     }
 
     private revealClues() {
@@ -56,5 +58,6 @@ export class WitnessCase extends Component {
         this.clueElements.forEach((element) => element.active = false);
         if (this.revealButton) this.revealButton.active = false;
         this.getSlotPanels().forEach((panel) => panel.active = false);
+        this.innocentSlots.forEach((slot) => slot.active = false);
     }
 }

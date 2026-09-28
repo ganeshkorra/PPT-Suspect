@@ -1,5 +1,4 @@
 import { _decorator, AudioClip, AudioSource, Color, Component, director, EventMouse, EventTouch, input, Input, Label, Node, Sprite, SpriteFrame, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
-import { Graphics } from 'cc';
 import { Analytics, analyticsEvents } from './Analytics';
 import { PersonCard } from './PersonCard';
 import { TutorialController } from './TutorialController';
@@ -66,6 +65,7 @@ export class GameManager extends Component {
     private draggedCard: PersonCard | null = null;
     private locked = false;
     private gameFinished = false;
+    private witnessTransitioning = false;
     private tutorialActive = false;
     private remainingSeconds = 0;
     private timerStarted = false;
@@ -416,7 +416,10 @@ export class GameManager extends Component {
     }
 
     private getCurrentSlotPanels() {
-        const witness = this.witnesses[this.currentWitnessIndex];
+        return this.getSlotPanels(this.witnesses[this.currentWitnessIndex]);
+    }
+
+    private getSlotPanels(witness: WitnessCase | undefined) {
         if (!witness) return [];
         return [...new Set(witness.innocentSlots.map((slot) => slot.parent).filter((panel): panel is Node => panel !== null))];
     }
@@ -448,6 +451,19 @@ export class GameManager extends Component {
             .delay(delay)
             .to(duration, { position: state.position, scale: state.scale, eulerAngles: state.eulerAngles }, { easing: 'quadOut' })
             .start();
+    }
+
+    private prepareFadeNode(node: Node) {
+        node.active = true;
+        const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
+        Tween.stopAllByTarget(opacity);
+        opacity.opacity = 0;
+    }
+
+    private playFadeNode(node: Node, delay: number, duration: number) {
+        const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
+        Tween.stopAllByTarget(opacity);
+        tween(opacity).delay(delay).to(duration, { opacity: 255 }, { easing: 'sineOut' }).start();
     }
 
     private revealCurrentClue(dramatic = false) {
@@ -630,50 +646,34 @@ export class GameManager extends Component {
         this.showCTA();
     }
 
-    private playWitnessReveal(witness: WitnessCase | undefined, delay: number, dramatic = false) {
+    private playWitnessReveal(witness: WitnessCase | undefined, delay: number, dramatic = false, fadeSlotPanels = true) {
         if (!witness) return;
-        if (witness.witnessRoot) {
-            if (dramatic) this.playBurstNode(witness.witnessRoot, delay);
-            else this.playPresentationNode(witness.witnessRoot, delay, 0.32);
+        if (fadeSlotPanels) {
+            this.getCurrentSlotPanels().forEach((panel, index) => {
+                this.playFadeNode(panel, delay + 0.34 + index * 0.06, 0.24);
+            });
         }
-        this.getCurrentSlotPanels().forEach((panel, index) => {
-            if (dramatic) this.playBurstNode(panel, delay + 0.3 + index * 0.07);
-            else this.playPresentationNode(panel, delay + 0.34 + index * 0.06, 0.34);
-        });
         this.scheduleOnce(() => this.revealCurrentClue(dramatic), delay + (dramatic ? 0.76 : 0.78));
         this.scheduleOnce(() => this.locked = false, delay + (dramatic ? 1.18 : 1.08));
     }
 
-    private prepareBurstNode(node: Node, offsetX: number, offsetY: number, scaleMultiplier: number, rotationZ = 0) {
-        if (!node.active) return;
-        const state = { position: node.position.clone(), scale: node.scale.clone(), eulerAngles: node.eulerAngles.clone() };
-        this.presentationStates.set(node, state);
-        const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
-        opacity.opacity = 0;
-        node.setPosition(state.position.x + offsetX, state.position.y + offsetY, state.position.z);
-        node.setScale(state.scale.x * scaleMultiplier, state.scale.y * scaleMultiplier, state.scale.z);
-        node.setRotationFromEuler(state.eulerAngles.x, state.eulerAngles.y, state.eulerAngles.z + rotationZ);
+    private safeWitnessCall(witness: WitnessCase | null | undefined, method: 'configure' | 'complete' | 'showCompletedLabel', ...args: any[]) {
+        if (!witness || typeof (witness as any)[method] !== 'function') return;
+        (witness as any)[method](...args);
     }
 
-    private playBurstNode(node: Node, delay: number) {
-        const state = this.presentationStates.get(node);
-        if (!state) return;
-        const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
-        tween(opacity).delay(delay).to(0.13, { opacity: 255 }, { easing: 'sineOut' }).start();
-        tween(node)
-            .delay(delay)
-            .to(0.27, {
-                position: state.position,
-                scale: new Vec3(state.scale.x * 1.08, state.scale.y * 1.08, state.scale.z),
-                eulerAngles: state.eulerAngles,
-            }, { easing: 'backOut' })
-            .to(0.15, { scale: state.scale }, { easing: 'sineOut' })
-            .start();
-    }
-
-    private playWitnessExit(witness: WitnessCase, onComplete: () => void) {
+    private playWitnessExit(witness: WitnessCase, nextWitness: WitnessCase | undefined, onComplete: () => void) {
         this.voiceSource?.stop();
-        const slotPanels = this.getCurrentSlotPanels();
+
+        if (this.witnesses.length > 0) {
+            this.witnesses.forEach((entry) => {
+                if (!entry || entry === witness || entry === nextWitness) return;
+                this.safeWitnessCall(entry, 'complete');
+                this.safeWitnessCall(entry, 'configure', false, false);
+            });
+        }
+
+        const slotPanels = this.getSlotPanels(witness);
         for (const slot of witness.innocentSlots) {
             const occupant = this.slotOccupants.get(slot);
             if (occupant && occupant.node && (occupant.node as any).isValid) {
@@ -682,25 +682,45 @@ export class GameManager extends Component {
             }
         }
 
-        // Animate only top-level visual roots. Slots, placed cards and clue labels are
-        // children of these roots, so they move and fade together without reparenting.
-        const visualRoots: Node[] = witness.witnessRoot ? [witness.witnessRoot] : slotPanels;
-
-        visualRoots.forEach((root) => {
-            const startPosition = root.position.clone();
-            const startScale = root.scale.clone();
-            Tween.stopAllByTarget(root);
-            const opacity = root.getComponent(UIOpacity) ?? root.addComponent(UIOpacity);
+        // The police character stays fixed. Clues animate away, while the red slot
+        // panel only fades and never changes its authored position, scale or rotation.
+        witness.clueElements.forEach((clue) => {
+            const startScale = clue.scale.clone();
+            Tween.stopAllByTarget(clue);
+            const opacity = clue.getComponent(UIOpacity) ?? clue.addComponent(UIOpacity);
             Tween.stopAllByTarget(opacity);
             opacity.opacity = 255;
-            tween(opacity).to(0.46, { opacity: 0 }, { easing: 'sineInOut' }).start();
-            tween(root)
-                .to(0.46, {
-                    position: new Vec3(startPosition.x - 34, startPosition.y + 18, startPosition.z),
-                    scale: new Vec3(startScale.x * 0.94, startScale.y * 0.94, startScale.z),
-                }, { easing: 'quadInOut' })
+            tween(opacity).to(0.32, { opacity: 0 }, { easing: 'sineInOut' }).start();
+            tween(clue)
+                .to(0.34, {
+                    position: new Vec3(clue.position.x - 70, clue.position.y + 8, clue.position.z),
+                    scale: new Vec3(startScale.x * 0.9, startScale.y * 0.9, startScale.z),
+                }, { easing: 'quadIn' })
                 .start();
         });
+
+        const dissolveDuration = 0.42;
+        slotPanels.forEach((panel) => {
+            const opacity = panel.getComponent(UIOpacity) ?? panel.addComponent(UIOpacity);
+            Tween.stopAllByTarget(opacity);
+            opacity.opacity = 255;
+            tween(opacity).to(dissolveDuration, { opacity: 0 }, { easing: 'sineInOut' }).start();
+        });
+
+        // Cross-dissolve directly into the next slot panel so the red card never
+        // disappears into an empty gap. The duplicated police sprite is unchanged.
+        if (nextWitness) {
+            nextWitness.configure(true, false);
+            const nextPanels = this.getSlotPanels(nextWitness);
+            nextPanels.forEach((panel) => {
+                this.prepareFadeNode(panel);
+            });
+            // Give constrained ad webviews a real frame at zero opacity before
+            // tweening. A zero-second schedule can still execute in the same frame.
+            this.scheduleOnce(() => {
+                nextPanels.forEach((panel) => this.playFadeNode(panel, 0, dissolveDuration));
+            }, 0.034);
+        }
 
         this.scheduleOnce(() => {
             onComplete();
@@ -883,6 +903,12 @@ export class GameManager extends Component {
     }
 
     private completeWitness(witness: WitnessCase) {
+        const witnessIndex = this.witnesses.indexOf(witness);
+        if (witnessIndex < 0 || witnessIndex !== this.currentWitnessIndex || this.witnessTransitioning || this.gameFinished) {
+            return;
+        }
+
+        this.witnessTransitioning = true;
         console.log('completeWitness called for witness', witness?.name ?? this.currentWitnessIndex);
         this.hideTutorial();
         // audio: play match sound when witness case completes
@@ -890,16 +916,23 @@ export class GameManager extends Component {
         witness.showCompletedLabel();
         this.playWitnessVoice(witness.completedClueVoice);
 
-        const exitWitness = () => this.playWitnessExit(witness, () => {
+        const nextWitness = this.witnesses[witnessIndex + 1];
+        const exitWitness = () => this.playWitnessExit(witness, nextWitness, () => {
             witness.complete();
-            this.currentWitnessIndex++;
+            this.currentWitnessIndex = witnessIndex + 1;
             this.dispatchChallengePassEvents();
-            const nextWitness = this.witnesses[this.currentWitnessIndex];
+            this.witnessTransitioning = false;
+
             if (nextWitness) {
-                nextWitness.configure(true, false);
-                if (nextWitness.witnessRoot) this.prepareBurstNode(nextWitness.witnessRoot, 28, 24, 0.94, 2);
-                this.getCurrentSlotPanels().forEach((panel) => this.prepareBurstNode(panel, 18, 20, 0.96, -2));
-                this.playWitnessReveal(nextWitness, 0.06, false);
+                this.witnesses.forEach((entry) => {
+                    if (!entry || entry === nextWitness) return;
+                    this.safeWitnessCall(entry, 'complete');
+                    this.safeWitnessCall(entry, 'configure', false, false);
+                });
+                this.safeWitnessCall(nextWitness, 'configure', true, false);
+                // Later witnesses use a clear clue-only entrance. The witness root
+                // itself is never moved, so the police character remains stationary.
+                this.playWitnessReveal(nextWitness, 0.06, true, false);
                 return;
             }
             this.finishMatchAndShowCTA();
@@ -930,52 +963,57 @@ export class GameManager extends Component {
         }
     }
 
-    private createConfettiBlast(origin?: Vec3 | Node, count = 24) {
-        console.log('createConfettiBlast called', origin, count);
-        const sceneRoot = director.getScene() ?? this.node;
-        let center: Vec3;
-        if (!origin) center = this.node.worldPosition.clone();
-        else if ((origin as Node).worldPosition) center = ((origin as Node).worldPosition).clone();
-        else center = (origin as Vec3).clone();
-
-        const colors = [
-            new Color(255, 84, 84, 255),
-            new Color(255, 195, 0, 255),
-            new Color(86, 196, 255, 255),
-            new Color(123, 255, 132, 255),
-            new Color(201, 121, 255, 255),
-        ];
-
-        for (let i = 0; i < count; i++) {
-            const conf = new Node('confetti');
-            try {
-                if (sceneRoot && (sceneRoot as any).addChild) (sceneRoot as Node).addChild(conf);
-                else this.node.addChild(conf);
-            } catch (e) { this.node.addChild(conf); }
-            const g = conf.addComponent(Graphics);
-            const c = colors[Math.floor(Math.random() * colors.length)];
-            g.fillColor = c;
-            g.rect(-4, -6, 8, 12);
-            g.fill();
-            const opacity = conf.getComponent(UIOpacity) ?? conf.addComponent(UIOpacity);
-            opacity.opacity = 255;
-            // Parent to scene root and set world position so tweening worldPosition works
-            try { conf.setWorldPosition(center); } catch (e) { try { conf.setPosition(center); } catch (e2) { /* ignore */ } }
-
-            const vx = (Math.random() * 2 - 1) * 220;
-            const vy = 150 + Math.random() * 320;
-            const rot = (Math.random() * 2 - 1) * 720;
-            const mid = new Vec3(center.x + vx * 0.5, center.y + vy * 0.5 - 80, center.z);
-            const end = new Vec3(center.x + vx * 1.1, center.y - 120 - Math.random() * 80, center.z);
-
-            tween(conf)
-                .to(0.6, { worldPosition: mid, eulerAngles: new Vec3(0, 0, rot) }, { easing: 'cubicOut' })
-                .to(0.6, { worldPosition: end, eulerAngles: new Vec3(0, 0, rot * 2) }, { easing: 'cubicIn' })
-                .call(() => { try { conf.destroy(); } catch (e) { /* ignore */ } })
-                .start();
-
-            tween(opacity).delay(0.6).to(0.8, { opacity: 0 }, { easing: 'sineIn' }).start();
+    private playRealPeopleReveal(onComplete: () => void) {
+        const realCards = this.personCards.filter((card) => card.canRevealAsReal).slice(0, 2);
+        if (realCards.length === 0) {
+            console.warn('[GameManager] No real-person cards are configured; skipping the final reveal.');
+            this.scheduleOnce(onComplete, 0.5);
+            return;
         }
+        if (realCards.length !== 2) {
+            console.warn(`[GameManager] Expected 2 real-person cards, found ${realCards.length}.`);
+        }
+
+        const suspectPanel = this.getSuspectPanel();
+        const revealSpacing = 270;
+        const revealY = -5;
+
+        realCards.forEach((card, index) => {
+            card.showSourceButton();
+            const root = card.revealRoot;
+            Tween.stopAllByTarget(root);
+            Tween.stopAllByTarget(card.node);
+            root.active = true;
+            root.setParent(this.node, true);
+            root.setSiblingIndex(this.node.children.length - 1);
+
+            const baseScale = root.scale.clone();
+            const finalScale = new Vec3(baseScale.x * 2, baseScale.y * 2, baseScale.z);
+            const popScale = new Vec3(finalScale.x * 1.025, finalScale.y * 1.025, finalScale.z);
+            const targetX = (index - (realCards.length - 1) * 0.5) * revealSpacing;
+
+            tween(root)
+                .delay(index * 0.08)
+                .to(0.82, {
+                    position: new Vec3(targetX, revealY, root.position.z),
+                    scale: finalScale,
+                }, { easing: 'cubicInOut' })
+                .to(0.14, { scale: popScale }, { easing: 'sineOut' })
+                .to(0.18, { scale: finalScale }, { easing: 'sineInOut' })
+                .call(() => card.revealAsReal(0.65))
+                .start();
+        });
+
+        if (suspectPanel) {
+            const opacity = suspectPanel.getComponent(UIOpacity) ?? suspectPanel.addComponent(UIOpacity);
+            Tween.stopAllByTarget(opacity);
+            tween(opacity)
+                .to(0.55, { opacity: 0 }, { easing: 'sineInOut' })
+                .call(() => suspectPanel.active = false)
+                .start();
+        }
+
+        this.scheduleOnce(onComplete, 2.45);
     }
 
     private finishMatchAndShowCTA() {
@@ -992,13 +1030,8 @@ export class GameManager extends Component {
         // audio: ensure match sound plays on final win
         try { this.playMatchSound(); } catch (e) { /* ignore */ }
 
-        // Always show confetti on win to celebrate
-        try {
-            console.log('Winning: triggering confetti');
-            this.createConfettiBlast(undefined, 36);
-        } catch (e) { /* ignore confetti errors */ }
-        // Delay CTA by 0.5s to give final animations a moment when player wins
-        try { this.scheduleOnce(() => this.showCTA(), 0.5); } catch (e) { this.showCTA(); }
+        // Reveal the two surviving people before the end card covers gameplay.
+        this.playRealPeopleReveal(() => this.showCTA());
     }
 
     private showKillerThenCTA() {

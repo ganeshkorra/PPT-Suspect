@@ -1,0 +1,11 @@
+# Project state
+
+- Active scene: `assets/mannequins.scene` (Cocos Creator 3.8.8, 2D UI playable).
+- Initial witness presentation keeps its authored entrance animation.
+- Later witness transitions keep the police static, cross-dissolve the red slot panels, and animate clues separately.
+- AppLovin witness-transition fix: later witnesses now explicitly use the dramatic clue-only entrance (the previous call incorrectly passed `dramatic = false`, producing only a subtle 6% scale change). The outgoing clue fades/slides left, the next clue enters from the right with a clear scale settle, and the police root is never tweened. Incoming red panels spend 0.034 seconds at zero opacity before their 0.42-second fade so constrained ad webviews render a real intermediate frame. `Witness1` through `Witness4` retain explicit `witnessRoot`, `thumbnail-middle` clue, and `Cards` panel mappings.
+- Final reveal: the two configured real-person cards ease to center at 2x their list scale, convert through a 0.65-second left-to-right portrait wipe, pause briefly, then open the CTA. Confetti is intentionally disabled.
+- Scene wiring: button 8 uses `M-Lady` and reveals `R-Lady`; button 15 uses `M-Man` and reveals `R-Man`. Both cards have `personIds = ["Real"]`, assigned real portrait frames, and explicit `sourceButton` references. Runtime detection uses the `Real` ID plus portrait frame because Cocos may reserialize the optional checkbox as false.
+- Validation: `mannequins.scene` parses successfully; `git diff --check` passes; project scripts pass Cocos Creator's bundled TypeScript compiler with `--skipLibCheck`. Engine declaration files fail without that flag due to unrelated Cocos SDK typings.
+- AppLovin package: the current standalone test artifact is `build/super-html/applovin/CTS-Mannequins.html` (SHA-256 `5A311D2B5F8C2CA4E154C0B3C6E98062EF500A9D20F325FD9AFC61D956854EBA`, generated 2026-09-28 21:03:07). AppLovin previews this generated HTML, not the live TypeScript source, so an older uploaded HTML will not contain the fix.
+- Remaining QA: reload Preview, play through all four witnesses, and confirm final card centering, portrait alignment, portrait/landscape framing, and CTA clickability.
